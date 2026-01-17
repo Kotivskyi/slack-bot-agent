@@ -23,6 +23,50 @@ uv run uvicorn app.main:app --reload --port 8000
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 
+## Slack Integration
+
+### Setup ngrok (for local development)
+
+Slack requires a public URL for webhooks. Use ngrok to expose your local server:
+
+```bash
+# Install ngrok (macOS)
+brew install ngrok
+
+# Authenticate (get token from https://ngrok.com)
+ngrok config add-authtoken YOUR_AUTH_TOKEN
+
+# Start tunnel
+ngrok http 8000
+```
+
+### Configure Slack App
+
+1. Create app at https://api.slack.com/apps
+2. Enable Event Subscriptions with URL: `https://YOUR_NGROK_URL/slack/events`
+3. Subscribe to events: `message.channels`, `message.im`, `app_mention`
+4. Add bot scopes: `chat:write`, `channels:history`, `im:history`
+5. Install to workspace
+
+### Environment Variables
+
+Add to `.env`:
+```bash
+SLACK_BOT_TOKEN=xoxb-your-token
+SLACK_SIGNING_SECRET=your-secret
+```
+
+### Test
+
+```bash
+# Verify the endpoint responds
+curl -X POST localhost:8000/slack/events \
+  -H "Content-Type: application/json" \
+  -H "X-Slack-Request-Timestamp: $(date +%s)" \
+  -H "X-Slack-Signature: v0=test" \
+  -d '{"type":"url_verification","challenge":"test123"}'
+```
+
 ## Commands
 
 ```bash

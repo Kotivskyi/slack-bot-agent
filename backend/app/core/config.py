@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     AI_FRAMEWORK: str = "langgraph"
     LLM_PROVIDER: str = "openai"
 
+    # === Slack ===
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_SIGNING_SECRET: str = ""
+
     # === CORS ===
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8080"]
     CORS_ALLOW_CREDENTIALS: bool = True
