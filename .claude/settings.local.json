@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: Slack analytics app with FastAPI and LangGraph\n\nSets up project structure with:\n- FastAPI backend with repository/service pattern\n- LangGraph AI agents\n- PostgreSQL database with async support\n- Docker compose configuration\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(PRE_COMMIT_ALLOW_NO_CONFIG=1 git add:*)",
+      "Bash(PRE_COMMIT_ALLOW_NO_CONFIG=1 git commit -m \"$\\(cat <<''EOF''\nInitial commit: Slack analytics app with FastAPI and LangGraph\n\nSets up project structure with:\n- FastAPI backend with repository/service pattern\n- LangGraph AI agents\n- PostgreSQL database with async support\n- Docker compose configuration\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

@@ -1,0 +1,89 @@
+TODO:
+ DB request are read only
+ Pipulate DB with some data
+How streaming will effect scalability?
+Setup Architecture Rules and others
+
+Which SQL attacks exists ??
+Do I need Sandboxing?
+Unit Test
+Integration Tests
+Evals
+Local Dev Setup
+Infractructure as a code
+How CSV download will work?
+
+Manual Tests:
+- analytics requests
+- context enryment
+- Offscope request
+- show SQL query
+- CSV request
+- Large CSV request (10000 items)
+- Write request to DB
+
+Improvements:
+- Task Queue (Celery): Retry, Scheduled Tasks, Daily Reports, Data Cleanup tasks, 
+- Reddis: Rate limits,  caching, Task Queues
+
+- Utilise Slack Threads
+- Slack Status
+- Streaming Reponses
+- Implement Streaming
+- Application Info DB is External + Validation
+- Data retention policy
+
+- AWS cost limits
+- Inference cost limits
+- Agent Runtime Sandbox
+- CI pipeline
+- CD pipeline
+- Prompt Management
+- Online Evaluation:
+  - Customer Statisfaction (like/dislike)
+  - Toxisite
+  - Relevance
+- User Level Permission
+
+- Offline Evaluation: 
+    - Quick during developmm
+    - Full (on CI / Release Pipeline)
+- Release Pipeline
+- LiteLLM:
+    - cost tracking
+    - backup models
+    - backup inference providers
+
+
+Infrastructure alerts:
+Response Time
+CPU/Memory load
+DB storage
+Errors
+Service Health
+Inference Cost
+AWS cost
+
+Metrics:
+Response Time
+Error Rate
+Queue Size
+
+Offline Evals:
+SQL request Errors
+Context Enrichments - correct does it picks correctcontex?
+Intent Classification Correctness
+Chat Specific: Toxisity
+JailBrake tests
+
+Online Evals:
+- SQL request Errors
+- Toxisity
+- Relevance
+- Response Time
+
+
+
+
+
+
