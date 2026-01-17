@@ -189,11 +189,11 @@ backend/
 │   │       ├── tools.py     # Agent tools
 │   │       └── prompts.py   # System prompts
 │   └── commands/            # CLI commands
-├── evals/                   # Evaluation framework
-│   ├── evaluator.py         # Core evaluation logic
+├── evals/                   # Evaluation framework (pydantic-evals)
 │   ├── main.py              # CLI entry point
-│   ├── schemas.py           # ScoreSchema, EvalReport
-│   └── metrics/prompts/     # Metric definitions (*.md)
+│   ├── dataset.py           # Test cases and dataset
+│   ├── evaluator.py         # Custom evaluators and LLM judges
+│   └── schemas.py           # AgentInput, AgentOutput types
 ├── tests/                   # pytest test suite
 └── alembic/                 # Database migrations
 ```
@@ -206,14 +206,14 @@ backend/
 
 ## Evaluations
 
-Run agent evaluations against defined metrics:
+Agent evaluation framework using [pydantic-evals](https://ai.pydantic.dev/evals/).
 
 ```bash
 cd backend
 
 # Using Make
-make evals            # Full evaluation
-make evals-quick      # Quick mode (first 5 traces)
+make evals            # Full evaluation (5 cases, 4 evaluators)
+make evals-quick      # Quick mode (2 cases, 1 evaluator)
 
 # Or directly with uv
 uv run python -m evals.main
@@ -221,23 +221,29 @@ uv run python -m evals.main --quick
 uv run python -m evals.main --no-report
 ```
 
-### Adding Metrics
+### Evaluators
 
-Create markdown files in `evals/metrics/prompts/`:
+| Evaluator | Type | Description |
+|-----------|------|-------------|
+| `ContainsExpected` | Deterministic | Checks response contains expected substrings |
+| `ToolsUsed` | Deterministic | Verifies expected tools were called |
+| `AccuracyJudge` | LLM Judge | Scores factual accuracy (0-1) |
+| `HelpfulnessJudge` | LLM Judge | Scores helpfulness (0-1) |
 
-```markdown
-# My Metric
+### Adding Test Cases
 
-Evaluate whether the agent's response meets criteria X.
+Edit `evals/dataset.py`:
 
-## Scoring Guidelines
-
-- **Score 1.0**: Excellent
-- **Score 0.5**: Partial
-- **Score 0.0**: Failed
+```python
+Case(
+    name="my_test",
+    inputs=AgentInput(user_input="Hello"),
+    expected_output=ExpectedOutput(contains=["hello"]),
+    metadata={"category": "greeting"},
+)
 ```
 
-Reports are saved to `evals/reports/`.
+Reports are saved to `evals/reports/`. Results are sent to [Logfire](https://logfire.pydantic.dev) when `LOGFIRE_TOKEN` is set. See [docs/evals.md](docs/evals.md) for details.
 
 ## Documentation
 

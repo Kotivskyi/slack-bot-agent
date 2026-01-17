@@ -1,245 +1,128 @@
-"""Core evaluation logic for agent traces.
+"""Core evaluation logic using pydantic-evals.
 
-Provides the Evaluator class for scoring agent responses against metrics.
+Provides evaluators for scoring agent responses.
 """
 
-import json
-import logging
-from datetime import datetime
-from pathlib import Path
-from uuid import uuid4
+from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
-from openai import AsyncOpenAI
-
-from evals.schemas import EvalReport, EvalResult, MetricDefinition, ScoreSchema, TraceData
-
-logger = logging.getLogger(__name__)
+from evals.schemas import AgentInput, AgentOutput, ExpectedOutput
 
 
-class Evaluator:
-    """Evaluator for agent traces.
+class ContainsExpected(Evaluator[AgentInput, AgentOutput, ExpectedOutput]):
+    """Check if response contains expected substrings."""
 
-    Loads metrics from markdown files and uses an LLM to score traces
-    against each metric.
+    async def evaluate(
+        self, ctx: EvaluatorContext[AgentInput, AgentOutput, ExpectedOutput]
+    ) -> float:
+        """Evaluate if response contains expected content.
 
-    Usage:
-        evaluator = Evaluator()
-        report = await evaluator.run(traces)
+        Args:
+            ctx: Evaluation context with input, output, and expected values.
+
+        Returns:
+            Score between 0 and 1 based on matches.
+        """
+        if not ctx.expected_output or not ctx.expected_output.contains:
+            return 1.0
+
+        response_lower = ctx.output.response.lower()
+        matches = sum(1 for s in ctx.expected_output.contains if s.lower() in response_lower)
+        return matches / len(ctx.expected_output.contains)
+
+
+class ToolsUsed(Evaluator[AgentInput, AgentOutput, ExpectedOutput]):
+    """Check if expected tools were called."""
+
+    async def evaluate(
+        self, ctx: EvaluatorContext[AgentInput, AgentOutput, ExpectedOutput]
+    ) -> float:
+        """Evaluate if expected tools were called.
+
+        Args:
+            ctx: Evaluation context with input, output, and expected values.
+
+        Returns:
+            Score between 0 and 1 based on tool matches.
+        """
+        if not ctx.expected_output or not ctx.expected_output.tool_names:
+            return 1.0
+
+        called_tools = {tc.get("name", "") for tc in ctx.output.tool_calls}
+        expected_tools = set(ctx.expected_output.tool_names)
+        matches = len(called_tools & expected_tools)
+        return matches / len(expected_tools)
+
+
+def create_accuracy_judge(model: str = "openai:gpt-4o-mini") -> LLMJudge:
+    """Create an LLM judge for accuracy evaluation.
+
+    Args:
+        model: Model to use for evaluation (default: gpt-4o-mini).
+
+    Returns:
+        Configured LLMJudge evaluator.
     """
+    return LLMJudge(
+        model=model,
+        include_input=True,
+        rubric="""Evaluate the accuracy of the agent's response.
 
-    def __init__(
-        self,
-        metrics_dir: Path | None = None,
-        model: str = "gpt-4o-mini",
-    ):
-        """Initialize the evaluator.
+## Scoring Guidelines
 
-        Args:
-            metrics_dir: Path to directory containing metric prompts.
-                        Defaults to evals/metrics/prompts.
-            model: OpenAI model to use for evaluation.
-        """
-        self.client = AsyncOpenAI()
-        self.model = model
+- **Score 1.0**: Completely accurate response that fully addresses the user's input.
+  The information is correct and relevant.
 
-        if metrics_dir is None:
-            metrics_dir = Path(__file__).parent / "metrics" / "prompts"
-        self.metrics_dir = metrics_dir
+- **Score 0.75**: Mostly accurate with minor omissions that don't significantly
+  impact usefulness.
 
-        self.metrics = self._load_metrics()
+- **Score 0.5**: Partially accurate. Addresses some aspects but misses important
+  points or contains some inaccuracies.
 
-    def _load_metrics(self) -> list[MetricDefinition]:
-        """Load metric definitions from markdown files.
+- **Score 0.25**: Mostly inaccurate with only minor relevant information.
 
-        Returns:
-            List of MetricDefinition objects.
-        """
-        metrics = []
+- **Score 0.0**: Completely inaccurate, irrelevant, or nonsensical.
 
-        if not self.metrics_dir.exists():
-            logger.warning(f"Metrics directory not found: {self.metrics_dir}")
-            return metrics
+## Considerations
 
-        for md_file in self.metrics_dir.glob("*.md"):
-            try:
-                content = md_file.read_text()
-                name = md_file.stem
+- Did the agent correctly understand the user's intent?
+- Is the factual information provided correct?
+- Are tool calls used appropriately?
+- Does the response fully address the question?
+""",
+    )
 
-                # Extract description from first paragraph after title
-                lines = content.strip().split("\n")
-                description = ""
-                for line in lines[1:]:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        description = line
-                        break
 
-                metrics.append(
-                    MetricDefinition(
-                        name=name,
-                        description=description,
-                        prompt=content,
-                    )
-                )
-                logger.info(f"Loaded metric: {name}")
-            except Exception as e:
-                logger.error(f"Failed to load metric from {md_file}: {e}")
+def create_helpfulness_judge(model: str = "openai:gpt-4o-mini") -> LLMJudge:
+    """Create an LLM judge for helpfulness evaluation.
 
-        return metrics
+    Args:
+        model: Model to use for evaluation (default: gpt-4o-mini).
 
-    async def run(
-        self,
-        traces: list[TraceData] | None = None,
-        quick: bool = False,
-    ) -> EvalReport:
-        """Run evaluation on traces.
+    Returns:
+        Configured LLMJudge evaluator.
+    """
+    return LLMJudge(
+        model=model,
+        include_input=True,
+        rubric="""Evaluate how helpful the agent's response is.
 
-        Args:
-            traces: List of traces to evaluate. If None, fetches from logs.
-            quick: If True, only evaluate first 5 traces.
+## Scoring Guidelines
 
-        Returns:
-            EvalReport with results and summary.
-        """
-        if traces is None:
-            traces = await self._fetch_traces()
+- **Score 1.0**: Extremely helpful. Provides clear, actionable information
+  that fully addresses the user's needs.
 
-        if quick and len(traces) > 5:
-            traces = traces[:5]
-            logger.info("Quick mode: evaluating only first 5 traces")
+- **Score 0.75**: Helpful with minor room for improvement.
 
-        results: list[EvalResult] = []
+- **Score 0.5**: Somewhat helpful but missing key information or clarity.
 
-        for trace in traces:
-            for metric in self.metrics:
-                try:
-                    score = await self._evaluate_trace(trace, metric)
-                    results.append(
-                        EvalResult(
-                            trace_id=trace.trace_id,
-                            metric_name=metric.name,
-                            score=score,
-                        )
-                    )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to evaluate trace {trace.trace_id} with {metric.name}: {e}"
-                    )
+- **Score 0.25**: Minimally helpful. Vague or incomplete.
 
-        summary = self._compute_summary(results)
+- **Score 0.0**: Not helpful at all. Fails to provide useful information.
 
-        return EvalReport(
-            report_id=str(uuid4()),
-            total_traces=len(traces),
-            results=results,
-            summary=summary,
-        )
+## Considerations
 
-    async def _evaluate_trace(
-        self,
-        trace: TraceData,
-        metric: MetricDefinition,
-    ) -> ScoreSchema:
-        """Evaluate a single trace against a metric.
-
-        Args:
-            trace: The trace to evaluate.
-            metric: The metric to use.
-
-        Returns:
-            ScoreSchema with score and reasoning.
-        """
-        evaluation_prompt = f"""You are an AI evaluator. Evaluate the following agent interaction based on the metric defined below.
-
-## Metric: {metric.name}
-
-{metric.prompt}
-
-## Interaction to Evaluate
-
-**User Input:** {trace.user_input}
-
-**Agent Response:** {trace.agent_response}
-
-**Tool Calls:** {json.dumps(trace.tool_calls, indent=2) if trace.tool_calls else "None"}
-
-## Your Task
-
-Evaluate the interaction and provide:
-1. A score between 0.0 and 1.0
-2. A brief reasoning for your score
-
-Respond in JSON format:
-{{"score": <float>, "reasoning": "<string>"}}
-"""
-
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "user", "content": evaluation_prompt}],
-            response_format={"type": "json_object"},
-        )
-
-        content = response.choices[0].message.content
-        if not content:
-            raise ValueError("Empty response from evaluator")
-
-        result = json.loads(content)
-        return ScoreSchema(
-            score=float(result["score"]),
-            reasoning=str(result["reasoning"]),
-        )
-
-    async def _fetch_traces(self) -> list[TraceData]:
-        """Fetch traces from logs or Logfire.
-
-        This is a placeholder that returns sample traces.
-        In production, implement fetching from your observability platform.
-
-        Returns:
-            List of TraceData objects.
-        """
-        logger.warning("Using sample traces - implement _fetch_traces for production")
-        return [
-            TraceData(
-                trace_id="sample-1",
-                user_input="What time is it?",
-                agent_response="The current time is 2024-01-15T10:30:00Z.",
-                tool_calls=[{"name": "current_datetime", "args": {}}],
-                duration_ms=150.0,
-                timestamp=datetime.now(),
-            ),
-            TraceData(
-                trace_id="sample-2",
-                user_input="Hello, how are you?",
-                agent_response="Hello! I'm doing well, thank you for asking. How can I help you today?",
-                tool_calls=[],
-                duration_ms=80.0,
-                timestamp=datetime.now(),
-            ),
-        ]
-
-    def _compute_summary(self, results: list[EvalResult]) -> dict[str, dict[str, float]]:
-        """Compute summary statistics by metric.
-
-        Args:
-            results: List of evaluation results.
-
-        Returns:
-            Dict mapping metric names to statistics.
-        """
-        summary: dict[str, dict[str, float]] = {}
-
-        for metric in self.metrics:
-            metric_results = [r for r in results if r.metric_name == metric.name]
-            if not metric_results:
-                continue
-
-            scores = [r.score.score for r in metric_results]
-            summary[metric.name] = {
-                "count": len(scores),
-                "mean": sum(scores) / len(scores),
-                "min": min(scores),
-                "max": max(scores),
-            }
-
-        return summary
+- Is the response clear and easy to understand?
+- Does it provide actionable information?
+- Is the tone appropriate and professional?
+""",
+    )

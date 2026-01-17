@@ -37,7 +37,7 @@ docker compose up -d
 ```
 backend/
 ├── app/
-│   ├── api/routes/       # HTTP endpoints (agent.py, slack.py)
+│   ├── api/routes/       # HTTP endpoints (health.py, slack.py)
 │   ├── services/         # Business logic (agent.py, slack.py)
 │   ├── repositories/     # Data access (checkpoint.py)
 │   ├── schemas/          # Pydantic models
@@ -47,10 +47,10 @@ backend/
 │   │   ├── checkpointer.py   # PostgresCheckpointer
 │   │   └── assistant/        # Agent graph, nodes, tools
 │   └── commands/         # CLI commands
-├── evals/                # Agent evaluation framework
+├── evals/                # Agent evaluation (pydantic-evals)
 │   ├── main.py           # CLI: uv run python -m evals.main
-│   ├── evaluator.py      # Evaluation logic
-│   └── metrics/prompts/  # Metric definitions (*.md)
+│   ├── dataset.py        # Test cases
+│   └── evaluator.py      # Custom evaluators
 └── Makefile              # Common commands
 ```
 
@@ -58,8 +58,6 @@ backend/
 
 Routes are mounted at root level:
 - `/health` - Health check
-- `/items` - Items CRUD
-- `/conversations` - Conversation management
 - `/slack/events` - Slack webhook
 
 ## AI Agent

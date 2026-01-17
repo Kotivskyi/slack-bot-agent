@@ -1,14 +1,14 @@
 """CLI entry point for running evaluations.
 
 Usage:
-    python -m evals.main [--quick] [--no-report]
+    uv run python -m evals.main [--quick] [--no-report]
 """
 # ruff: noqa: E402 - load_dotenv must run before imports that use env vars
 
 import argparse
-import asyncio
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -17,54 +17,56 @@ from dotenv import load_dotenv
 # Load .env from backend directory
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from evals.evaluator import Evaluator
-from evals.schemas import EvalReport
+# Configure Logfire for pydantic-evals integration
+import logfire
+
+if os.getenv("LOGFIRE_TOKEN"):
+    logfire.configure()
+
+from pydantic_evals.reporting import EvaluationReport
+
+from evals.dataset import create_dataset, create_quick_dataset
+from evals.schemas import AgentInput, AgentOutput
 
 logger = logging.getLogger(__name__)
 
 
-def print_summary(report: EvalReport) -> None:
-    """Print a formatted summary of the evaluation report.
+async def run_agent(inputs: AgentInput) -> AgentOutput:
+    """Run the agent and return output.
+
+    This is the task function that pydantic-evals will evaluate.
 
     Args:
-        report: The evaluation report to summarize.
+        inputs: The agent input containing user message.
+
+    Returns:
+        AgentOutput with response and tool calls.
     """
-    print("\n" + "=" * 60)
-    print("EVALUATION REPORT")
-    print("=" * 60)
-    print(f"\nReport ID: {report.report_id}")
-    print(f"Created: {report.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Total Traces Evaluated: {report.total_traces}")
+    from uuid import uuid4
 
-    print("\n" + "-" * 60)
-    print("SUMMARY BY METRIC")
-    print("-" * 60)
+    from app.db.session import get_db_context
+    from app.services.agent import AgentService
 
-    for metric_name, stats in report.summary.items():
-        print(f"\n{metric_name.upper()}")
-        print(f"  Count: {stats['count']:.0f}")
-        print(f"  Mean:  {stats['mean']:.2f}")
-        print(f"  Min:   {stats['min']:.2f}")
-        print(f"  Max:   {stats['max']:.2f}")
+    thread_id = inputs.thread_id or f"eval-{uuid4()}"
 
-    print("\n" + "-" * 60)
-    print("DETAILED RESULTS")
-    print("-" * 60)
+    async with get_db_context() as db:
+        agent_service = AgentService(db)
+        response, tool_events = await agent_service.run(
+            user_input=inputs.user_input,
+            thread_id=thread_id,
+        )
 
-    for result in report.results:
-        print(f"\nTrace: {result.trace_id}")
-        print(f"  Metric: {result.metric_name}")
-        print(f"  Score:  {result.score.score:.2f}")
-        print(f"  Reason: {result.score.reasoning[:100]}...")
+    tool_calls = [{"name": e["name"], "args": e.get("args", {})} for e in tool_events]
 
-    print("\n" + "=" * 60)
+    return AgentOutput(response=response, tool_calls=tool_calls)
 
 
-def save_report(report: EvalReport) -> Path:
+def save_report(report: EvaluationReport, prefix: str = "eval") -> Path:
     """Save the evaluation report to a JSON file.
 
     Args:
-        report: The report to save.
+        report: The pydantic-evals report.
+        prefix: Filename prefix.
 
     Returns:
         Path to the saved report file.
@@ -73,12 +75,34 @@ def save_report(report: EvalReport) -> Path:
     reports_dir.mkdir(exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = reports_dir / f"eval_report_{timestamp}.json"
+    report_path = reports_dir / f"{prefix}_report_{timestamp}.json"
+
+    # Build report dict from EvaluationReport attributes
+    report_data = {
+        "name": report.name,
+        "averages": report.averages,
+        "cases": [
+            {
+                "name": case.name,
+                "inputs": case.inputs.model_dump()
+                if hasattr(case.inputs, "model_dump")
+                else str(case.inputs),
+                "output": case.output.model_dump()
+                if hasattr(case.output, "model_dump")
+                else str(case.output),
+                "scores": case.scores,
+                "assertions": case.assertions,
+                "metrics": case.metrics,
+            }
+            for case in report.cases
+        ],
+        "trace_id": report.trace_id,
+        "span_id": report.span_id,
+    }
 
     with open(report_path, "w") as f:
-        json.dump(report.model_dump(), f, indent=2, default=str)
+        json.dump(report_data, f, indent=2, default=str)
 
-    logger.info(f"Report saved to: {report_path}")
     return report_path
 
 
@@ -89,39 +113,48 @@ async def run_evaluation(args: argparse.Namespace) -> None:
         args: Parsed command-line arguments.
     """
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-    print("Starting evaluation...")
+    print("Starting evaluation with pydantic-evals...")
 
-    evaluator = Evaluator()
+    # Create dataset
+    if args.quick:
+        dataset = create_quick_dataset()
+        print(f"Quick mode: {len(dataset.cases)} cases")
+    else:
+        dataset = create_dataset()
+        print(f"Full evaluation: {len(dataset.cases)} cases")
 
-    if not evaluator.metrics:
-        print("No metrics found! Add metric files to evals/metrics/prompts/")
-        return
+    # Run evaluation
+    report = await dataset.evaluate(run_agent)
 
-    print(f"Loaded {len(evaluator.metrics)} metrics: {[m.name for m in evaluator.metrics]}")
+    # Print results
+    report.print(include_input=True, include_output=True)
 
-    report = await evaluator.run(quick=args.quick)
-
-    print_summary(report)
-
+    # Save report
     if not args.no_report:
-        report_path = save_report(report)
+        report_path = save_report(report, prefix="quick" if args.quick else "full")
         print(f"\nReport saved to: {report_path}")
 
 
 def main() -> None:
     """Main entry point for the evaluation CLI."""
     parser = argparse.ArgumentParser(
-        description="Run agent evaluations",
+        description="Run agent evaluations using pydantic-evals",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    uv run python -m evals.main              # Full evaluation
+    uv run python -m evals.main --quick      # Quick evaluation (2 cases)
+    uv run python -m evals.main --no-report  # Don't save report
+        """,
     )
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick mode: only evaluate first 5 traces",
+        help="Quick mode: evaluate only 2 test cases",
     )
     parser.add_argument(
         "--no-report",
@@ -137,8 +170,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    import asyncio
 
     asyncio.run(run_evaluation(args))
 
