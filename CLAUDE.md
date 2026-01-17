@@ -32,31 +32,35 @@ make docker-up        # Start all backend services
 ## Project Structure
 
 ```
-backend/
-├── app/
-│   ├── api/routes/       # HTTP endpoints (health.py, slack.py)
-│   ├── services/         # Business logic (agent.py, slack.py)
-│   ├── repositories/     # Data access (checkpoint.py)
-│   ├── schemas/          # Pydantic models
-│   ├── db/models/        # Database models (checkpoint.py)
-│   ├── core/             # Config, middleware, logging
-│   ├── agents/           # AI agents
-│   │   ├── checkpointer.py       # PostgresCheckpointer
-│   │   ├── assistant/            # Generic agent (ReAct pattern)
-│   │   └── analytics_chatbot/    # Analytics SQL chatbot
-│   │       ├── graph.py          # LangGraph workflow
-│   │       ├── state.py          # ChatbotState, CacheEntry
-│   │       ├── prompts.py        # LLM prompts
-│   │       ├── routing.py        # Conditional routing
-│   │       └── nodes/            # Node implementations
-│   └── commands/         # CLI commands
-├── docs/                 # Documentation
-│   └── agent_architecture.md  # Analytics chatbot docs
-├── evals/                # Agent evaluation (pydantic-evals)
-│   ├── main.py           # CLI: uv run python -m evals.main
-│   ├── dataset.py        # Test cases
-│   └── evaluator.py      # Custom evaluators
-└── Makefile              # Common commands
+├── docs/                     # Documentation (project root)
+│   ├── database_skill.md     # Database & repository patterns
+│   ├── agent_architecture.md # Analytics chatbot docs
+│   ├── patterns.md           # General patterns
+│   ├── testing.md            # Testing guide
+│   └── ...
+├── backend/
+│   ├── app/
+│   │   ├── api/routes/       # HTTP endpoints (health.py, slack.py)
+│   │   ├── services/         # Business logic (agent.py, slack.py)
+│   │   ├── repositories/     # Data access (checkpoint.py)
+│   │   ├── schemas/          # Pydantic models
+│   │   ├── db/models/        # Database models (checkpoint.py)
+│   │   ├── core/             # Config, middleware, logging
+│   │   ├── agents/           # AI agents
+│   │   │   ├── checkpointer.py       # PostgresCheckpointer
+│   │   │   ├── assistant/            # Generic agent (ReAct pattern)
+│   │   │   └── analytics_chatbot/    # Analytics SQL chatbot
+│   │   │       ├── graph.py          # LangGraph workflow
+│   │   │       ├── state.py          # ChatbotState, CacheEntry
+│   │   │       ├── prompts.py        # LLM prompts
+│   │   │       ├── routing.py        # Conditional routing
+│   │   │       └── nodes/            # Node implementations
+│   │   └── commands/         # CLI commands
+│   ├── evals/                # Agent evaluation (pydantic-evals)
+│   │   ├── main.py           # CLI: uv run python -m evals.main
+│   │   ├── dataset.py        # Test cases
+│   │   └── evaluator.py      # Custom evaluators
+│   └── Makefile              # Common commands
 ```
 
 ## API Routes
@@ -120,14 +124,80 @@ async with get_db_context() as db:
 
 ## Key Conventions
 
-- Use `db.flush()` in repositories (not `commit`)
-- Services raise domain exceptions (`NotFoundError`, `AlreadyExistsError`)
-- Schemas: separate `Create`, `Update`, `Response` models
 - Commands auto-discovered from `app/commands/`
+
+### Database & Repository Patterns
+
+**Repositories:**
+- Always extend `BaseRepository` for entity repositories
+- Use `db.flush()` (not `commit`) — let callers manage transactions
+- Pass session to methods, don't store in `__init__`
+
+**Services:**
+- Store session in `__init__`, instantiate repositories
+- Raise domain exceptions (`NotFoundError`, `AlreadyExistsError`) — never `HTTPException`
+- Orchestrate business logic across repositories
+
+**Schemas:**
+- `XxxCreate` — required fields for creation
+- `XxxUpdate` — all fields optional (partial updates)
+- `XxxResponse` — all fields + timestamps, inherit from `BaseSchema`
+
+**Session patterns:**
+```python
+# Routes: FastAPI dependency injection
+@router.get("/users")
+async def get_users(db: AsyncSession = Depends(get_db_session)):
+    ...
+
+# Background tasks: context manager
+async with get_db_context() as db:
+    ...
+
+# Analytics (read-only, always rollbacks):
+async with get_analytics_db_context() as db:
+    ...
+```
+
+### Dependency Injection
+
+Use FastAPI's `Depends` for:
+- Database session management (`get_db_session`)
+- Authentication/authorization
+- Shared business logic reuse
+- Configuration injection
+
+### Async Patterns
+
+Async everywhere in this project:
+- Route handlers (`async def`)
+- Database operations (`await db.execute()`)
+- Background tasks
+- External API calls
+
+### Best Practices
+
+| Do | Don't |
+|----|-------|
+| Async for DB, external APIs | Sync database drivers (blocks event loop) |
+| Business logic in services | Business logic in route handlers |
+| Domain exceptions in services | `HTTPException` in services |
+| Type hints on all functions | Missing type annotations |
+| Test all layers | Skip integration tests |
+
+### Common Pitfalls
+
+- **Blocking in async:** Using `psycopg2` instead of async driver
+- **Fat routes:** DB queries and business logic directly in handlers
+- **Commit in repos:** Use `flush()`, let caller manage transactions
+- **Session in repo `__init__`:** Pass session to methods instead
+
+**Full guide:** `docs/database_skill.md`
 
 ## Where to Find More Info
 
 Before starting complex tasks, read relevant docs:
+- **Database patterns:** `docs/database_skill.md`
 - **Analytics chatbot:** `docs/agent_architecture.md`
 - **Design document:** `langgraph_slack_chatbot_design.md`
 

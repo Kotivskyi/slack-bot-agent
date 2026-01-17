@@ -7,7 +7,7 @@ handling conversation history, checkpointing, and tool execution.
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langgraph.graph.state import CompiledStateGraph
@@ -16,6 +16,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents import AgentContext, build_assistant_graph
 from app.agents.analytics_chatbot import AnalyticsChatbot
 from app.agents.checkpointer import PostgresCheckpointer
+
+if TYPE_CHECKING:
+    from app.repositories import AnalyticsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -360,6 +363,7 @@ class AnalyticsAgentService:
         self._checkpoint_db = checkpoint_db
         self._analytics_db = analytics_db
         self._checkpointer: PostgresCheckpointer | None = None
+        self._analytics_repository: AnalyticsRepository | None = None
         self._chatbot: AnalyticsChatbot | None = None
 
     @property
@@ -370,11 +374,25 @@ class AnalyticsAgentService:
         return self._checkpointer
 
     @property
+    def analytics_repository(self) -> "AnalyticsRepository":
+        """Get or create the AnalyticsRepository instance.
+
+        Pattern 1: Repository created without session.
+        Session is passed to methods at call time.
+        """
+        if self._analytics_repository is None:
+            from app.repositories import AnalyticsRepository
+
+            self._analytics_repository = AnalyticsRepository()
+        return self._analytics_repository
+
+    @property
     def chatbot(self) -> AnalyticsChatbot:
         """Get or create the AnalyticsChatbot instance."""
         if self._chatbot is None:
             self._chatbot = AnalyticsChatbot(
-                analytics_db=self._analytics_db,
+                db=self._analytics_db,
+                repository=self.analytics_repository,
                 checkpointer=self.checkpointer,
             )
         return self._chatbot

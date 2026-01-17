@@ -9,13 +9,12 @@ Defines the complete workflow graph with nodes and edges for:
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import logfire
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analytics_chatbot.nodes import (
     classify_intent,
@@ -33,31 +32,42 @@ from app.agents.analytics_chatbot.nodes.sql_executor import execute_and_cache
 from app.agents.analytics_chatbot.routing import route_after_validation, route_by_intent
 from app.agents.analytics_chatbot.state import ChatbotState
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.repositories import AnalyticsRepository
+
 logger = logging.getLogger(__name__)
 
 
-def create_executor_node(db: AsyncSession):
-    """Create executor node with database session bound.
+def create_executor_node(db: "AsyncSession", repository: "AnalyticsRepository"):
+    """Create executor node with db session and repository bound.
 
     Args:
-        db: Async database session for query execution.
+        db: Database session for query execution.
+        repository: Analytics repository for query execution.
 
     Returns:
         Async function that executes SQL and caches results.
     """
 
     async def executor_node(state: ChatbotState) -> dict[str, Any]:
-        return await execute_and_cache(state, db)
+        return await execute_and_cache(state, db, repository)
 
     return executor_node
 
 
-def create_analytics_chatbot(db: AsyncSession | None = None) -> StateGraph:
+def create_analytics_chatbot(
+    db: "AsyncSession | None" = None,
+    repository: "AnalyticsRepository | None" = None,
+) -> StateGraph:
     """Create the complete LangGraph workflow for the Slack analytics chatbot.
 
     Args:
-        db: Optional async database session. If provided, SQL execution is enabled.
-            If None, a placeholder executor is used that requires db at invoke time.
+        db: Optional database session for SQL execution.
+        repository: Optional analytics repository for SQL execution. If both
+            db and repository are provided, SQL execution is enabled.
+            If either is None, a placeholder is used.
 
     Returns:
         Uncompiled StateGraph instance.
@@ -78,16 +88,16 @@ def create_analytics_chatbot(db: AsyncSession | None = None) -> StateGraph:
         workflow.add_node("sql_generator", generate_sql)
         workflow.add_node("sql_validator", validate_sql)
 
-        # Executor node - needs db session
-        if db is not None:
-            workflow.add_node("executor", create_executor_node(db))
+        # Executor node - needs both db and repository
+        if db is not None and repository is not None:
+            workflow.add_node("executor", create_executor_node(db, repository))
         else:
             # Placeholder that will be replaced at invoke time
             async def placeholder_executor(state: ChatbotState) -> dict[str, Any]:
-                logfire.error("Executor called without database session")
+                logfire.error("Executor called without repository")
                 return {
                     "query_results": None,
-                    "sql_error": "Database session not configured",
+                    "sql_error": "Analytics repository not configured",
                     "row_count": 0,
                     "column_names": [],
                 }
@@ -154,20 +164,22 @@ def create_analytics_chatbot(db: AsyncSession | None = None) -> StateGraph:
 
 
 def compile_analytics_chatbot(
-    db: AsyncSession | None = None,
+    db: "AsyncSession | None" = None,
+    repository: "AnalyticsRepository | None" = None,
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Compile the analytics chatbot graph.
 
     Args:
-        db: Optional async database session for SQL execution.
+        db: Optional database session for SQL execution.
+        repository: Optional analytics repository for SQL execution.
         checkpointer: Optional checkpointer for state persistence.
 
     Returns:
         Compiled StateGraph ready for invocation.
     """
     with logfire.span("compile_analytics_chatbot"):
-        workflow = create_analytics_chatbot(db)
+        workflow = create_analytics_chatbot(db, repository)
 
         # Compile with optional checkpointer
         app = workflow.compile(checkpointer=checkpointer) if checkpointer else workflow.compile()
@@ -180,21 +192,24 @@ class AnalyticsChatbot:
     """High-level wrapper for the analytics chatbot.
 
     Provides a cleaner interface for running the chatbot with proper
-    database session and state management.
+    repository injection and state management.
     """
 
     def __init__(
         self,
-        analytics_db: AsyncSession,
+        db: "AsyncSession",
+        repository: "AnalyticsRepository",
         checkpointer: BaseCheckpointSaver | None = None,
     ):
         """Initialize the chatbot.
 
         Args:
-            analytics_db: Async database session for SQL execution (read-only).
+            db: Database session for SQL execution.
+            repository: Analytics repository for SQL execution.
             checkpointer: Optional checkpointer for state persistence.
         """
-        self._analytics_db = analytics_db
+        self._db = db
+        self._repository = repository
         self._checkpointer = checkpointer
         self._graph: CompiledStateGraph | None = None
 
@@ -203,7 +218,8 @@ class AnalyticsChatbot:
         """Lazy-load the compiled graph."""
         if self._graph is None:
             self._graph = compile_analytics_chatbot(
-                db=self._analytics_db,
+                db=self._db,
+                repository=self._repository,
                 checkpointer=self._checkpointer,
             )
         return self._graph

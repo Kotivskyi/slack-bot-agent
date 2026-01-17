@@ -19,7 +19,7 @@ from langgraph.checkpoint.base import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_context
-from app.repositories import checkpoint_repo
+from app.repositories import CheckpointRepository
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         """
         super().__init__()
         self._db = db
+        self._repository = CheckpointRepository()
 
     def _get_thread_id(self, config: RunnableConfig) -> str:
         """Extract thread_id from config."""
@@ -140,7 +141,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         checkpoint_id = self._get_checkpoint_id(config)
 
         async def _get(db: AsyncSession) -> CheckpointTuple | None:
-            checkpoint_record = await checkpoint_repo.get_checkpoint(db, thread_id, checkpoint_id)
+            checkpoint_record = await self._repository.get(db, thread_id, checkpoint_id)
             if not checkpoint_record:
                 return None
 
@@ -198,7 +199,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         serialized = self._serialize_checkpoint(checkpoint)
 
         async def _put(db: AsyncSession) -> None:
-            await checkpoint_repo.put_checkpoint(
+            await self._repository.put(
                 db,
                 thread_id=thread_id,
                 checkpoint_id=checkpoint_id,
@@ -245,7 +246,7 @@ class PostgresCheckpointer(BaseCheckpointSaver):
         thread_id = self._get_thread_id(config)
 
         async def _list(db: AsyncSession) -> list:
-            return await checkpoint_repo.list_checkpoints(db, thread_id, limit=limit or 10)
+            return await self._repository.list(db, thread_id, limit=limit or 10)
 
         if self._db:
             checkpoints = await _list(self._db)

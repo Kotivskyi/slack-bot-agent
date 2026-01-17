@@ -1,38 +1,30 @@
 """SQL executor node for the analytics chatbot.
 
 Executes validated SQL and caches results for later retrieval.
-No LLM calls - pure database operations.
+No LLM calls - pure database operations via repository.
 """
 
 import hashlib
 import logging
 from datetime import datetime
-from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import logfire
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analytics_chatbot.state import CacheEntry, ChatbotState
 
+if TYPE_CHECKING:
+    from app.repositories import AnalyticsRepository
+
 logger = logging.getLogger(__name__)
 
 
-def _serialize_value(value: Any) -> Any:
-    """Convert database values to JSON-serializable format."""
-    if value is None:
-        return None
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if hasattr(value, "isoformat"):  # date, time, etc.
-        return value.isoformat()
-    return value
-
-
-async def execute_and_cache(state: ChatbotState, db: AsyncSession) -> dict[str, Any]:
+async def execute_and_cache(
+    state: ChatbotState,
+    db: AsyncSession,
+    repository: "AnalyticsRepository",
+) -> dict[str, Any]:
     """Execute SQL query and cache results.
 
     Caching enables cost-effective CSV export and SQL retrieval
@@ -40,28 +32,23 @@ async def execute_and_cache(state: ChatbotState, db: AsyncSession) -> dict[str, 
 
     Args:
         state: Current chatbot state with generated_sql.
-        db: Async database session for query execution.
+        db: Database session for query execution.
+        repository: Analytics repository for query execution.
 
     Returns:
         Dict with query_results, row_count, column_names, current_query_id,
         and updated query_cache.
     """
     sql = state.get("generated_sql", "")
+    sql_hash = hashlib.md5(sql.encode()).hexdigest()[:8]
 
-    with logfire.span("execute_and_cache", sql_hash=hashlib.md5(sql.encode()).hexdigest()[:8]):
+    with logfire.span("execute_and_cache", sql_hash=sql_hash):
         try:
-            # Execute query
-            result = await db.execute(text(sql))
-            columns = list(result.keys())
-            rows_raw = result.fetchall()
-
-            # Convert to list of dicts with JSON-serializable values
-            rows = [
-                {col: _serialize_value(row[i]) for i, col in enumerate(columns)} for row in rows_raw
-            ]
+            # Execute query via the repository
+            rows, columns = await repository.execute_query(db, sql)
 
             # Generate cache key from SQL hash
-            query_id = hashlib.md5(sql.encode()).hexdigest()[:8]
+            query_id = sql_hash
 
             # Build cache entry
             cache_entry: CacheEntry = {
@@ -105,23 +92,3 @@ async def execute_and_cache(state: ChatbotState, db: AsyncSession) -> dict[str, 
                 "row_count": 0,
                 "column_names": [],
             }
-
-
-def execute_and_cache_sync(state: ChatbotState) -> dict[str, Any]:
-    """Synchronous wrapper that returns a partial state requiring async execution.
-
-    This is used when the graph is invoked synchronously.
-    The actual execution happens via the graph's async invoke.
-
-    Note: In practice, the graph should always be invoked with ainvoke()
-    to support async database operations.
-    """
-    # This node requires async execution
-    # Return error if called synchronously
-    logfire.warn("execute_and_cache called synchronously, returning error")
-    return {
-        "query_results": None,
-        "sql_error": "SQL execution requires async context. Use ainvoke() to run the graph.",
-        "row_count": 0,
-        "column_names": [],
-    }
