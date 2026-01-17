@@ -1,11 +1,80 @@
 """Application middleware."""
 
+import logging
+import time
+from contextvars import ContextVar
 from typing import ClassVar
 from uuid import uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+
+# Context variables for request-scoped data
+request_id_ctx: ContextVar[str | None] = ContextVar("request_id", default=None)
+user_id_ctx: ContextVar[str | None] = ContextVar("user_id", default=None)
+
+logger = logging.getLogger(__name__)
+
+
+def get_logging_context() -> dict[str, str | None]:
+    """Get the current logging context.
+
+    Returns a dict with request_id and user_id from context variables.
+    Useful for adding context to log records.
+    """
+    return {
+        "request_id": request_id_ctx.get(),
+        "user_id": user_id_ctx.get(),
+    }
+
+
+def set_user_id(user_id: str | None) -> None:
+    """Set the user_id in the logging context."""
+    user_id_ctx.set(user_id)
+
+
+class LoggingContextMiddleware(BaseHTTPMiddleware):
+    """Middleware that adds logging context and timing to requests.
+
+    Sets up context variables for request_id and logs request start/completion
+    with timing information. Useful for request correlation in logs.
+
+    The request_id is taken from X-Request-ID header if present,
+    otherwise a new UUID is generated.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Process request with logging context."""
+        request_id = request.headers.get("X-Request-ID", str(uuid4()))
+        request_id_ctx.set(request_id)
+
+        start_time = time.perf_counter()
+
+        logger.info(
+            "Request started",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+            },
+        )
+
+        response = await call_next(request)
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(
+            "Request completed",
+            extra={
+                "request_id": request_id,
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 2),
+            },
+        )
+
+        response.headers["X-Request-ID"] = request_id
+        return response
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):

@@ -9,15 +9,24 @@
 ## Commands
 
 ```bash
-# Backend
 cd backend
-uv run uvicorn app.main:app --reload --port 8000
-pytest
-ruff check . --fix && ruff format .
 
-# Database
+# Using Make (recommended)
+make dev              # Start dev server
+make test             # Run tests
+make check            # Lint + format
+make migrate          # Apply migrations
+make migrate-create   # Create new migration
+make evals            # Run evaluations
+make evals-quick      # Quick evaluation (5 traces)
+
+# Or directly with uv
+uv run uvicorn app.main:app --reload --port 8000
+uv run pytest
+uv run ruff check . --fix && uv run ruff format .
 uv run alembic upgrade head
 uv run alembic revision --autogenerate -m "Description"
+uv run python -m evals.main
 
 # Docker
 docker compose up -d
@@ -26,15 +35,23 @@ docker compose up -d
 ## Project Structure
 
 ```
-backend/app/
-├── api/routes/       # HTTP endpoints (root-level, no versioning)
-├── services/         # Business logic
-├── repositories/     # Data access
-├── schemas/          # Pydantic models
-├── db/models/        # Database models
-├── core/config.py    # Settings
-├── agents/           # AI agents
-└── commands/         # CLI commands
+backend/
+├── app/
+│   ├── api/routes/       # HTTP endpoints (agent.py, slack.py)
+│   ├── services/         # Business logic (agent.py, slack.py)
+│   ├── repositories/     # Data access (checkpoint.py)
+│   ├── schemas/          # Pydantic models
+│   ├── db/models/        # Database models (checkpoint.py)
+│   ├── core/             # Config, middleware, logging
+│   ├── agents/           # AI agents
+│   │   ├── checkpointer.py   # PostgresCheckpointer
+│   │   └── assistant/        # Agent graph, nodes, tools
+│   └── commands/         # CLI commands
+├── evals/                # Agent evaluation framework
+│   ├── main.py           # CLI: uv run python -m evals.main
+│   ├── evaluator.py      # Evaluation logic
+│   └── metrics/prompts/  # Metric definitions (*.md)
+└── Makefile              # Common commands
 ```
 
 ## API Routes
@@ -43,7 +60,27 @@ Routes are mounted at root level:
 - `/health` - Health check
 - `/items` - Items CRUD
 - `/conversations` - Conversation management
-- `/agent/ws` - WebSocket for AI agent
+- `/slack/events` - Slack webhook
+
+## AI Agent
+
+Uses `AgentService` for running the LangGraph ReAct agent:
+
+```python
+from app.services.agent import AgentService
+from app.db.session import get_db_context
+
+async with get_db_context() as db:
+    agent_service = AgentService(db)
+    output, tool_events = await agent_service.run(
+        user_input="Hello",
+        thread_id="my-thread",  # Same thread_id = resume conversation
+    )
+```
+
+- **Add tools:** `app/agents/assistant/tools.py`
+- **Modify prompts:** `app/agents/assistant/prompts.py`
+- **Checkpoints:** Stored in `agent_checkpoints` table
 
 ## Key Conventions
 

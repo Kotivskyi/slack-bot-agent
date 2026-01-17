@@ -1,4 +1,5 @@
 TODO:
+ MAKE sure Logfire works
  DB request are read only
  Pipulate DB with some data
 How streaming will effect scalability?

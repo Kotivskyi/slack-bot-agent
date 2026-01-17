@@ -123,8 +123,12 @@ async def test_direct_message_triggers_response(
 
     with (
         patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
+        patch(
+            "app.services.slack.slack_service.generate_ai_response", new_callable=AsyncMock
+        ) as mock_generate,
         patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
+        mock_generate.return_value = "AI response to: Hello bot!"
         mock_send.return_value = {"ok": True}
 
         response = await client.post(
@@ -138,9 +142,14 @@ async def test_direct_message_triggers_response(
         )
 
         assert response.status_code == 200
+        mock_generate.assert_called_once_with(
+            message="Hello bot!",
+            user_id="U123456",
+            thread_ts="1234567890.123456",
+        )
         mock_send.assert_called_once_with(
             channel="D123456",
-            text="Mock response to: Hello bot!",
+            text="AI response to: Hello bot!",
             thread_ts="1234567890.123456",
         )
 
@@ -241,8 +250,12 @@ async def test_app_mention_event(
 
     with (
         patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
+        patch(
+            "app.services.slack.slack_service.generate_ai_response", new_callable=AsyncMock
+        ) as mock_generate,
         patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
+        mock_generate.return_value = "AI response"
         mock_send.return_value = {"ok": True}
 
         response = await client.post(
@@ -256,4 +269,9 @@ async def test_app_mention_event(
         )
 
         assert response.status_code == 200
+        mock_generate.assert_called_once_with(
+            message="<@U987654> help me",
+            user_id="U123456",
+            thread_ts="1234567890.123456",
+        )
         mock_send.assert_called_once()

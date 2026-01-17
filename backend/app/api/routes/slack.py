@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
 from app.schemas.slack import SlackEventWrapper
 from app.services.slack import slack_service
@@ -12,13 +12,46 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def process_slack_message(channel: str, text: str, user: str, thread_ts: str | None) -> None:
+    """Process a Slack message in the background.
+
+    Args:
+        channel: Channel ID to respond to.
+        text: Message text from user.
+        user: User ID who sent the message.
+        thread_ts: Thread timestamp for replies.
+    """
+    logger.info(f"Processing message from user {user}: {text[:50]}...")
+
+    try:
+        # Generate AI response
+        ai_response = await slack_service.generate_ai_response(
+            message=text,
+            user_id=user,
+            thread_ts=thread_ts,
+        )
+
+        # Send response back to Slack
+        await slack_service.send_message(
+            channel=channel,
+            text=ai_response,
+            thread_ts=thread_ts,
+        )
+    except Exception:
+        logger.exception(f"Error processing message from user {user}")
+
+
 @router.post("/events", response_model=None)
 async def slack_events(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_slack_request_timestamp: str = Header(..., alias="X-Slack-Request-Timestamp"),
     x_slack_signature: str = Header(..., alias="X-Slack-Signature"),
 ) -> Response | dict:
     """Handle incoming Slack events.
+
+    Immediately acknowledges the request and processes messages in the background.
+    This prevents Slack from retrying (Slack expects response within 3 seconds).
 
     This endpoint handles:
     - URL verification challenges from Slack
@@ -35,7 +68,7 @@ async def slack_events(
     # Parse event
     event_wrapper = SlackEventWrapper.model_validate_json(body)
 
-    # Handle URL verification challenge
+    # Handle URL verification challenge (must respond synchronously)
     if event_wrapper.type == "url_verification":
         return {"challenge": event_wrapper.challenge}
 
@@ -57,20 +90,14 @@ async def slack_events(
         is_mention = event.type == "app_mention"
 
         if (is_direct_message or is_mention) and event.channel and event.text and event.user:
-            logger.info(f"Processing message from user {event.user}: {event.text[:50]}...")
-
-            # Generate AI response
-            ai_response = await slack_service.generate_ai_response(
-                message=event.text,
-                user_id=event.user,
-            )
-
-            # Send response back to Slack
-            await slack_service.send_message(
+            # Process message in background to respond quickly to Slack
+            background_tasks.add_task(
+                process_slack_message,
                 channel=event.channel,
-                text=ai_response,
+                text=event.text,
+                user=event.user,
                 thread_ts=event.ts,
             )
 
-    # Always return 200 to acknowledge receipt
+    # Always return 200 immediately to acknowledge receipt
     return Response(status_code=200)

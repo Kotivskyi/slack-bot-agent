@@ -1,6 +1,14 @@
 # Slack Analytics App
 
-FastAPI application with LangGraph AI agents.
+FastAPI application with LangGraph AI agents and PostgreSQL state persistence.
+
+## Features
+
+- **LangGraph ReAct Agent** - AI assistant with tool calling capabilities
+- **PostgreSQL Checkpointing** - Persistent conversation state across sessions
+- **Slack Integration** - Bot responds to DMs and mentions
+- **Structured Logging** - JSON logs in production, readable logs in development
+- **Evals Framework** - Evaluate agent responses against custom metrics
 
 ## Quick Start
 
@@ -52,36 +60,65 @@ ngrok http 8000
 
 Add to `.env`:
 ```bash
+# Required for AI Agent
+OPENAI_API_KEY=sk-your-key
+
+# Slack integration
 SLACK_BOT_TOKEN=xoxb-your-token
 SLACK_SIGNING_SECRET=your-secret
 ```
 
-### Test
-
-```bash
-# Verify the endpoint responds
-curl -X POST localhost:8000/slack/events \
-  -H "Content-Type: application/json" \
-  -H "X-Slack-Request-Timestamp: $(date +%s)" \
-  -H "X-Slack-Signature: v0=test" \
-  -d '{"type":"url_verification","challenge":"test123"}'
-```
 
 ## Commands
 
 ```bash
-# Backend
 cd backend
-uv run uvicorn app.main:app --reload --port 8000
-pytest
-ruff check . --fix && ruff format .
 
-# Database
+# Using Make (recommended)
+make dev              # Start dev server
+make test             # Run tests
+make check            # Lint + format
+make migrate          # Apply migrations
+make evals            # Run evaluations
+make evals-quick      # Run quick evaluation (5 traces)
+
+# Or directly with uv
+uv run uvicorn app.main:app --reload --port 8000
+uv run pytest
+uv run ruff check . --fix && uv run ruff format .
 uv run alembic upgrade head
-uv run alembic revision --autogenerate -m "Description"
+uv run python -m evals.main
 
 # Docker
 docker compose up -d
+```
+
+### Checkpointing
+
+Conversation state is automatically persisted to PostgreSQL:
+
+```python
+# Resume a conversation by using the same thread_id
+output, _ = await agent_service.run(
+    user_input="What did we discuss earlier?",
+    thread_id="conversation-123",  # Same thread_id resumes context
+)
+```
+
+### Adding Tools
+
+Add tools in `app/agents/assistant/tools.py`:
+
+```python
+from langchain_core.tools import tool
+
+@tool
+def my_tool(param: str) -> str:
+    """Tool description for the LLM."""
+    return f"Result: {param}"
+
+TOOLS = [current_datetime, my_tool]
+TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 ```
 
 ## Architecture
@@ -92,7 +129,8 @@ graph TB
         API[API Routes]
         Services[Services Layer]
         Repos[Repositories]
-        Agent[AI Agent]
+        Agent[AgentService]
+        Checkpointer[PostgresCheckpointer]
     end
 
     subgraph Infrastructure
@@ -100,14 +138,18 @@ graph TB
     end
 
     subgraph External
-        LLM[OpenAI/Anthropic]
+        LLM[OpenAI]
+        Slack[Slack API]
     end
 
     API --> Services
     Services --> Repos
     Services --> Agent
+    Agent --> Checkpointer
     Repos --> DB
+    Checkpointer --> DB
     Agent --> LLM
+    Services --> Slack
 ```
 
 ### Layered Architecture
@@ -117,8 +159,8 @@ The backend follows a **Repository + Service** pattern:
 | Layer | Responsibility |
 |-------|---------------|
 | **Routes** | HTTP handling, validation |
-| **Services** | Business logic, orchestration |
-| **Repositories** | Data access, queries |
+| **Services** | Business logic, AgentService |
+| **Repositories** | Data access, checkpoint storage |
 
 ## Project Structure
 
@@ -127,16 +169,31 @@ backend/
 ├── app/
 │   ├── main.py              # FastAPI app with lifespan
 │   ├── api/
-│   │   ├── routes/          # API endpoints
-│   │   ├── deps.py          # Dependency injection
+│   │   ├── routes/          # API endpoints (slack.py, health.py, etc.)
+│   │   ├── deps.py          # Dependency injection (AgentSvc, etc.)
 │   │   └── router.py        # Route aggregation
-│   ├── core/config.py       # Settings
-│   ├── db/models/           # SQLAlchemy models
+│   ├── core/
+│   │   ├── config.py        # Settings
+│   │   ├── middleware.py    # LoggingContextMiddleware
+│   │   └── logging_config.py # Structured logging setup
+│   ├── db/models/           # SQLAlchemy models (checkpoint.py)
 │   ├── schemas/             # Pydantic schemas
-│   ├── repositories/        # Data access layer
-│   ├── services/            # Business logic
-│   ├── agents/              # AI agents
+│   ├── repositories/        # Data access layer (checkpoint.py)
+│   ├── services/            # Business logic (agent.py, slack.py)
+│   ├── agents/
+│   │   ├── checkpointer.py  # PostgresCheckpointer
+│   │   └── assistant/       # Agent subpackage
+│   │       ├── graph.py     # build_assistant_graph()
+│   │       ├── nodes.py     # agent_node, tools_node
+│   │       ├── state.py     # AgentState, AgentContext
+│   │       ├── tools.py     # Agent tools
+│   │       └── prompts.py   # System prompts
 │   └── commands/            # CLI commands
+├── evals/                   # Evaluation framework
+│   ├── evaluator.py         # Core evaluation logic
+│   ├── main.py              # CLI entry point
+│   ├── schemas.py           # ScoreSchema, EvalReport
+│   └── metrics/prompts/     # Metric definitions (*.md)
 ├── tests/                   # pytest test suite
 └── alembic/                 # Database migrations
 ```
@@ -146,6 +203,41 @@ backend/
 - Use `db.flush()` in repositories (not `commit`)
 - Services raise domain exceptions (`NotFoundError`, `AlreadyExistsError`)
 - Schemas: separate `Create`, `Update`, `Response` models
+
+## Evaluations
+
+Run agent evaluations against defined metrics:
+
+```bash
+cd backend
+
+# Using Make
+make evals            # Full evaluation
+make evals-quick      # Quick mode (first 5 traces)
+
+# Or directly with uv
+uv run python -m evals.main
+uv run python -m evals.main --quick
+uv run python -m evals.main --no-report
+```
+
+### Adding Metrics
+
+Create markdown files in `evals/metrics/prompts/`:
+
+```markdown
+# My Metric
+
+Evaluate whether the agent's response meets criteria X.
+
+## Scoring Guidelines
+
+- **Score 1.0**: Excellent
+- **Score 0.5**: Partial
+- **Score 0.0**: Failed
+```
+
+Reports are saved to `evals/reports/`.
 
 ## Documentation
 

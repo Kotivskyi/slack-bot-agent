@@ -2,12 +2,15 @@
 
 import hashlib
 import hmac
+import logging
 import time
 
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SlackService:
@@ -33,10 +36,6 @@ class SlackService:
         Returns:
             True if signature is valid, False otherwise.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         if not self.signing_secret:
             logger.warning("No signing secret configured")
             return False
@@ -60,7 +59,9 @@ class SlackService:
 
         is_valid = hmac.compare_digest(expected_signature, signature)
         if not is_valid:
-            logger.warning(f"Signature mismatch: expected={expected_signature[:20]}... got={signature[:20]}...")
+            logger.warning(
+                f"Signature mismatch: expected={expected_signature[:20]}... got={signature[:20]}..."
+            )
         return is_valid
 
     async def send_message(
@@ -92,25 +93,47 @@ class SlackService:
         except SlackApiError as e:
             raise e
 
-    async def generate_ai_response(self, message: str, user_id: str) -> str:
-        """Generate AI response for a message.
-
-        This is a mock implementation. Replace with LangGraph agent later.
-
-        To integrate LangGraph:
-            from app.agents.langgraph_assistant import get_agent
-            agent = get_agent()
-            output, _, _ = await agent.run(message, history=[], thread_id=user_id)
-            return output
+    async def generate_ai_response(
+        self,
+        message: str,
+        user_id: str,
+        thread_ts: str | None = None,
+    ) -> str:
+        """Generate AI response using LangGraph agent.
 
         Args:
             message: The user's message.
             user_id: The Slack user ID.
+            thread_ts: Optional thread timestamp for conversation continuity.
 
         Returns:
             Generated AI response.
         """
-        return f"Mock response to: {message[:100]}"
+        from app.agents import AgentContext
+        from app.db.session import get_db_context
+        from app.services.agent import AgentService
+
+        # Thread ID for conversation continuity
+        thread_id = f"slack_thread_{thread_ts}" if thread_ts else f"slack_user_{user_id}"
+
+        context: AgentContext = {
+            "user_id": user_id,
+            "metadata": {"source": "slack"},
+        }
+
+        try:
+            async with get_db_context() as db:
+                agent_service = AgentService(db)
+                output, _ = await agent_service.run(
+                    user_input=message,
+                    thread_id=thread_id,
+                    history=[],  # Checkpointer handles history via thread_id
+                    context=context,
+                )
+            return output or "I couldn't generate a response."
+        except Exception:
+            logger.exception(f"Error generating AI response for user {user_id}")
+            return "Sorry, I encountered an error. Please try again."
 
 
 # Service instance

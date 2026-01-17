@@ -1,9 +1,26 @@
 """AI Agents module using LangGraph.
 
 This module contains a ReAct agent built with LangGraph.
-Tools are defined in the tools/ subdirectory.
+The assistant subpackage contains the refactored agent implementation.
 """
 
-from app.agents.langgraph_assistant import AgentContext, AgentState, LangGraphAssistant
+from app.agents.assistant import (
+    DEFAULT_SYSTEM_PROMPT,
+    AgentContext,
+    AgentState,
+    build_assistant_graph,
+)
+from app.agents.checkpointer import PostgresCheckpointer
 
-__all__ = ["AgentContext", "AgentState", "LangGraphAssistant"]
+# Legacy imports for backwards compatibility (deprecated)
+from app.agents.langgraph_assistant import LangGraphAssistant, get_agent
+
+__all__ = [
+    "DEFAULT_SYSTEM_PROMPT",
+    "AgentContext",
+    "AgentState",
+    "LangGraphAssistant",
+    "PostgresCheckpointer",
+    "build_assistant_graph",
+    "get_agent",
+]
