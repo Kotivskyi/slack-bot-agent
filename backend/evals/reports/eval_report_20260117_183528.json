@@ -1,0 +1,33 @@
+{
+  "report_id": "8c681ee7-0844-40d8-a31d-4c8973052937",
+  "created_at": "2026-01-17 18:35:28.206627",
+  "total_traces": 2,
+  "results": [
+    {
+      "trace_id": "sample-1",
+      "metric_name": "accuracy",
+      "score": {
+        "score": 1.0,
+        "reasoning": "The agent accurately provides the current time in a precise format (ISO 8601) in response to the user's request. The use of a tool call to obtain the current datetime confirms that the agent's information is up-to-date and relevant, fully addressing the user's question."
+      },
+      "evaluated_at": "2026-01-17 18:35:26.984036"
+    },
+    {
+      "trace_id": "sample-2",
+      "metric_name": "accuracy",
+      "score": {
+        "score": 1.0,
+        "reasoning": "The agent's response accurately addresses the user's greeting and inquiry about well-being, while also inviting further conversation. It is polite and relevant, fulfilling the user's intent effectively."
+      },
+      "evaluated_at": "2026-01-17 18:35:28.206571"
+    }
+  ],
+  "summary": {
+    "accuracy": {
+      "count": 2.0,
+      "mean": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    }
+  }
+}

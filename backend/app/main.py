@@ -9,7 +9,8 @@ from app.api.exception_handlers import register_exception_handlers
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.logfire_setup import instrument_app, setup_logfire
-from app.core.middleware import RequestIDMiddleware
+from app.core.logging_config import setup_logging
+from app.core.middleware import LoggingContextMiddleware, RequestIDMiddleware
 
 
 @asynccontextmanager
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     See: https://asgi.readthedocs.io/en/latest/specs/lifespan.html#lifespan-state
     """
     # === Startup ===
+    setup_logging()
     setup_logfire()
     from app.core.logfire_setup import instrument_asyncpg
 
@@ -52,16 +54,8 @@ def create_app() -> FastAPI:
             "description": "Health check endpoints for monitoring and Kubernetes probes",
         },
         {
-            "name": "items",
-            "description": "Example CRUD endpoints demonstrating the API pattern",
-        },
-        {
-            "name": "conversations",
-            "description": "AI conversation persistence - manage chat history",
-        },
-        {
-            "name": "agent",
-            "description": "AI agent WebSocket endpoint for real-time chat",
+            "name": "slack",
+            "description": "Slack bot webhook endpoints",
         },
     ]
 
@@ -97,6 +91,9 @@ My FastAPI project
     )
     # Logfire instrumentation
     instrument_app(app)
+
+    # Logging context middleware (adds request_id and timing)
+    app.add_middleware(LoggingContextMiddleware)
 
     # Request ID middleware (for request correlation/debugging)
     app.add_middleware(RequestIDMiddleware)

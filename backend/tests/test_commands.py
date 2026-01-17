@@ -103,24 +103,22 @@ class TestRegisterCommands:
 class TestSeedCommand:
     """Tests for the seed command."""
 
-    def test_seed_dry_run(self):
-        """Test seed command with --dry-run."""
+    def test_seed_runs(self):
+        """Test seed command executes."""
         from app.commands.seed import seed
 
         runner = CliRunner()
-        result = runner.invoke(seed, ["--dry-run", "--count", "5"])
+        result = runner.invoke(seed, [])
         assert result.exit_code == 0
-        assert "[DRY RUN]" in result.output
-        assert "5" in result.output
+        assert "No seedable entities configured" in result.output
 
-    def test_seed_dry_run_with_clear(self):
-        """Test seed command with --dry-run and --clear."""
+    def test_seed_with_options(self):
+        """Test seed command accepts options."""
         from app.commands.seed import seed
 
         runner = CliRunner()
-        result = runner.invoke(seed, ["--dry-run", "--clear"])
+        result = runner.invoke(seed, ["--dry-run", "--clear", "--count", "5"])
         assert result.exit_code == 0
-        assert "Would clear existing data" in result.output
 
 
 class TestHelloCommand:
