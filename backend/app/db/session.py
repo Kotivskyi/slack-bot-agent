@@ -3,6 +3,7 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -49,6 +50,27 @@ async def get_db_context() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+@asynccontextmanager
+async def get_analytics_db_context() -> AsyncGenerator[AsyncSession, None]:
+    """Get read-only database session for analytics queries.
+
+    This session:
+    - Uses READ ONLY transaction mode (enforced by PostgreSQL)
+    - Always rolls back (no commits possible)
+    - Is isolated from the main app session (separate transaction)
+
+    Use this for executing user-generated analytics SQL queries to:
+    - Prevent accidental writes from SQL injection
+    - Isolate query failures from checkpoint persistence
+    """
+    async with async_session_maker() as session:
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        try:
+            yield session
+        finally:
+            await session.rollback()
 
 
 async def close_db() -> None:

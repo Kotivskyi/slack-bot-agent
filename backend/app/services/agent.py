@@ -14,6 +14,7 @@ from langgraph.graph.state import CompiledStateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import AgentContext, build_assistant_graph
+from app.agents.analytics_chatbot import AnalyticsChatbot
 from app.agents.checkpointer import PostgresCheckpointer
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,31 @@ class StreamEvent:
 
     type: str
     data: dict = field(default_factory=dict)
+
+
+@dataclass
+class AnalyticsResponse:
+    """Response from the analytics chatbot.
+
+    Attributes:
+        text: Response text for Slack message.
+        slack_blocks: Slack Block Kit blocks for rich formatting.
+        intent: Classified intent of the user query.
+        query_cache: Updated query cache for session state.
+        conversation_history: Updated conversation history.
+        csv_content: CSV content if export was requested.
+        csv_filename: Filename for CSV export.
+        csv_title: Title for CSV file.
+    """
+
+    text: str
+    slack_blocks: list[dict] | None = None
+    intent: str | None = None
+    query_cache: dict | None = None
+    conversation_history: list[dict] | None = None
+    csv_content: str | None = None
+    csv_filename: str | None = None
+    csv_title: str | None = None
 
 
 class AgentService:
@@ -299,3 +325,120 @@ class AgentService:
                 text_parts.append(block)
 
         return "".join(text_parts)
+
+
+class AnalyticsAgentService:
+    """Service for analytics chatbot interactions.
+
+    Provides a high-level interface for running the analytics chatbot
+    with SQL generation, caching, and Slack Block Kit formatting.
+
+    Usage:
+        analytics_service = AnalyticsAgentService(
+            checkpoint_db=checkpoint_db,
+            analytics_db=analytics_db,
+        )
+        response = await analytics_service.run(
+            user_query="How many apps do we have?",
+            thread_id="thread-123",
+            user_id="U12345",
+            channel_id="C12345",
+        )
+    """
+
+    def __init__(
+        self,
+        checkpoint_db: AsyncSession,
+        analytics_db: AsyncSession,
+    ):
+        """Initialize the analytics agent service.
+
+        Args:
+            checkpoint_db: Database session for LangGraph checkpoint persistence.
+            analytics_db: Database session for analytics SQL queries (read-only).
+        """
+        self._checkpoint_db = checkpoint_db
+        self._analytics_db = analytics_db
+        self._checkpointer: PostgresCheckpointer | None = None
+        self._chatbot: AnalyticsChatbot | None = None
+
+    @property
+    def checkpointer(self) -> PostgresCheckpointer:
+        """Get or create the PostgresCheckpointer instance."""
+        if self._checkpointer is None:
+            self._checkpointer = PostgresCheckpointer(self._checkpoint_db)
+        return self._checkpointer
+
+    @property
+    def chatbot(self) -> AnalyticsChatbot:
+        """Get or create the AnalyticsChatbot instance."""
+        if self._chatbot is None:
+            self._chatbot = AnalyticsChatbot(
+                analytics_db=self._analytics_db,
+                checkpointer=self.checkpointer,
+            )
+        return self._chatbot
+
+    async def run(
+        self,
+        user_query: str,
+        thread_id: str,
+        *,
+        user_id: str = "",
+        channel_id: str = "",
+        thread_ts: str | None = None,
+        conversation_history: list[dict[str, str]] | None = None,
+        query_cache: dict | None = None,
+    ) -> AnalyticsResponse:
+        """Run the analytics chatbot for a user query.
+
+        Args:
+            user_query: The user's question or command.
+            thread_id: Unique identifier for the conversation thread.
+            user_id: Slack user ID.
+            channel_id: Slack channel ID.
+            thread_ts: Slack thread timestamp.
+            conversation_history: Previous Q&A pairs in session.
+            query_cache: Cached query results from previous runs.
+
+        Returns:
+            AnalyticsResponse with text, blocks, and updated state.
+        """
+        logger.info(f"Running analytics chatbot: {user_query[:100]}...")
+
+        result = await self.chatbot.run(
+            user_query=user_query,
+            thread_id=thread_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            conversation_history=conversation_history,
+            query_cache=query_cache,
+        )
+
+        # Build updated conversation history
+        updated_history = list(conversation_history or [])
+        updated_history.append(
+            {
+                "user": user_query,
+                "bot": result.get("response_text", "")[:500],
+            }
+        )
+
+        response = AnalyticsResponse(
+            text=result.get("response_text", ""),
+            slack_blocks=result.get("slack_blocks"),
+            intent=result.get("intent"),
+            query_cache=result.get("query_cache", {}),
+            conversation_history=updated_history,
+            csv_content=result.get("csv_content"),
+            csv_filename=result.get("csv_filename"),
+            csv_title=result.get("csv_title"),
+        )
+
+        logger.info(
+            f"Analytics chatbot complete. Intent: {response.intent}, "
+            f"Response length: {len(response.text)} chars"
+        )
+
+        return response

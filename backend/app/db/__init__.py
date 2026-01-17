@@ -1,5 +1,5 @@
 """Database module."""
 
-from app.db.base import Base
+from app.db.models import Base
 
 __all__ = ["Base"]

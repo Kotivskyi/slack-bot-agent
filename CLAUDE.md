@@ -9,27 +9,24 @@
 ## Commands
 
 ```bash
-cd backend
-
-# Using Make (recommended)
-make dev              # Start dev server
+# Using Make (from project root)
+make run              # Start dev server (with hot reload)
 make test             # Run tests
-make check            # Lint + format
-make migrate          # Apply migrations
-make migrate-create   # Create new migration
-make evals            # Run evaluations
-make evals-quick      # Quick evaluation (5 traces)
+make lint             # Check code quality
+make format           # Auto-format code
+make db-init          # Initialize database (start + migrate)
+make db-upgrade       # Apply migrations
+make db-migrate       # Create new migration
 
-# Or directly with uv
-uv run uvicorn app.main:app --reload --port 8000
+# Or directly with uv (from backend/)
+cd backend
+uv run slack_analytics_app server run --reload
 uv run pytest
 uv run ruff check . --fix && uv run ruff format .
-uv run alembic upgrade head
-uv run alembic revision --autogenerate -m "Description"
-uv run python -m evals.main
 
 # Docker
-docker compose up -d
+make docker-db        # Start PostgreSQL only
+make docker-up        # Start all backend services
 ```
 
 ## Project Structure
@@ -44,9 +41,17 @@ backend/
 │   ├── db/models/        # Database models (checkpoint.py)
 │   ├── core/             # Config, middleware, logging
 │   ├── agents/           # AI agents
-│   │   ├── checkpointer.py   # PostgresCheckpointer
-│   │   └── assistant/        # Agent graph, nodes, tools
+│   │   ├── checkpointer.py       # PostgresCheckpointer
+│   │   ├── assistant/            # Generic agent (ReAct pattern)
+│   │   └── analytics_chatbot/    # Analytics SQL chatbot
+│   │       ├── graph.py          # LangGraph workflow
+│   │       ├── state.py          # ChatbotState, CacheEntry
+│   │       ├── prompts.py        # LLM prompts
+│   │       ├── routing.py        # Conditional routing
+│   │       └── nodes/            # Node implementations
 │   └── commands/         # CLI commands
+├── docs/                 # Documentation
+│   └── agent_architecture.md  # Analytics chatbot docs
 ├── evals/                # Agent evaluation (pydantic-evals)
 │   ├── main.py           # CLI: uv run python -m evals.main
 │   ├── dataset.py        # Test cases
@@ -58,9 +63,12 @@ backend/
 
 Routes are mounted at root level:
 - `/health` - Health check
-- `/slack/events` - Slack webhook
+- `/slack/events` - Slack event webhook (messages, mentions)
+- `/slack/interactions` - Slack interactive components (button clicks)
 
-## AI Agent
+## AI Agents
+
+### Generic Agent (ReAct Pattern)
 
 Uses `AgentService` for running the LangGraph ReAct agent:
 
@@ -80,6 +88,36 @@ async with get_db_context() as db:
 - **Modify prompts:** `app/agents/assistant/prompts.py`
 - **Checkpoints:** Stored in `agent_checkpoints` table
 
+### Analytics Chatbot
+
+Uses `AnalyticsAgentService` for SQL-based analytics via Slack:
+
+```python
+from app.services.agent import AnalyticsAgentService
+from app.db.session import get_db_context
+
+async with get_db_context() as db:
+    analytics_service = AnalyticsAgentService(db)
+    response = await analytics_service.run(
+        user_query="How many apps do we have?",
+        thread_id="slack-thread-123",
+        user_id="U12345",
+        channel_id="C12345",
+    )
+    # response.text - Response text
+    # response.slack_blocks - Slack Block Kit blocks
+    # response.intent - Classified intent
+```
+
+**Features:**
+- Intent routing (analytics, follow-up, export, show SQL, off-topic)
+- Natural language to SQL conversion
+- Result caching for cost optimization
+- Slack Block Kit formatting with action buttons
+- CSV export and SQL retrieval without LLM calls
+
+**Documentation:** `docs/agent_architecture.md`
+
 ## Key Conventions
 
 - Use `db.flush()` in repositories (not `commit`)
@@ -90,10 +128,8 @@ async with get_db_context() as db:
 ## Where to Find More Info
 
 Before starting complex tasks, read relevant docs:
-- **Architecture details:** `docs/architecture.md`
-- **Adding features:** `docs/adding_features.md`
-- **Testing guide:** `docs/testing.md`
-- **Code patterns:** `docs/patterns.md`
+- **Analytics chatbot:** `docs/agent_architecture.md`
+- **Design document:** `langgraph_slack_chatbot_design.md`
 
 ## Environment Variables
 
@@ -104,4 +140,49 @@ POSTGRES_HOST=localhost
 POSTGRES_PASSWORD=secret
 OPENAI_API_KEY=sk-...
 LOGFIRE_TOKEN=your-token
+LOGFIRE_READ_TOKEN=your-read-token  # For MCP server
 ```
+
+## Runtime Logs Access
+
+Two methods are available for Claude to access runtime logs:
+
+### 1. File-based Logging
+
+Application logs are written to `logs/app.log` in JSON format.
+
+**To read recent logs:**
+```bash
+# Read the log file directly
+Read logs/app.log
+
+# Or tail recent entries
+tail -100 logs/app.log
+```
+
+**Log format:** JSON with timestamp, level, logger, message, and context fields.
+
+**Configuration:**
+- Location: `logs/app.log`
+- Max size: 10 MB per file
+- Rotation: 5 backup files kept
+- Format: JSON (for easy parsing)
+
+### 2. Logfire MCP Server
+
+The project includes Logfire MCP configuration in `.mcp.json` for querying traces.
+
+**Setup:**
+1. Get a read token from Logfire dashboard
+2. Set `LOGFIRE_READ_TOKEN` environment variable
+3. Claude Code will auto-discover the MCP server
+
+**Usage:** Once configured, Claude can use Logfire MCP tools to:
+- Search traces by span name or attributes
+- View detailed span information
+- Analyze errors and performance
+
+**Example queries Claude can perform:**
+- "Find all SQL generation spans from the last hour"
+- "Show me errors in the analytics chatbot"
+- "What's the average latency for intent classification?"

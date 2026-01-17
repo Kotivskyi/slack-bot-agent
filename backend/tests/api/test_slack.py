@@ -105,7 +105,7 @@ async def test_old_timestamp_rejected(client: AsyncClient, slack_signing_secret:
 async def test_direct_message_triggers_response(
     client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
 ):
-    """Test that direct messages trigger AI response."""
+    """Test that direct messages trigger analytics response."""
     body = json.dumps(
         {
             "type": "event_callback",
@@ -124,11 +124,15 @@ async def test_direct_message_triggers_response(
     with (
         patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
         patch(
-            "app.services.slack.slack_service.generate_ai_response", new_callable=AsyncMock
+            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
         ) as mock_generate,
         patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
-        mock_generate.return_value = "AI response to: Hello bot!"
+        mock_generate.return_value = {
+            "text": "AI response to: Hello bot!",
+            "blocks": None,
+            "intent": "off_topic",
+        }
         mock_send.return_value = {"ok": True}
 
         response = await client.post(
@@ -145,12 +149,14 @@ async def test_direct_message_triggers_response(
         mock_generate.assert_called_once_with(
             message="Hello bot!",
             user_id="U123456",
+            channel_id="D123456",
             thread_ts="1234567890.123456",
         )
         mock_send.assert_called_once_with(
             channel="D123456",
             text="AI response to: Hello bot!",
             thread_ts="1234567890.123456",
+            blocks=None,
         )
 
 
@@ -251,11 +257,15 @@ async def test_app_mention_event(
     with (
         patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
         patch(
-            "app.services.slack.slack_service.generate_ai_response", new_callable=AsyncMock
+            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
         ) as mock_generate,
         patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
     ):
-        mock_generate.return_value = "AI response"
+        mock_generate.return_value = {
+            "text": "AI response",
+            "blocks": None,
+            "intent": "off_topic",
+        }
         mock_send.return_value = {"ok": True}
 
         response = await client.post(
@@ -272,6 +282,7 @@ async def test_app_mention_event(
         mock_generate.assert_called_once_with(
             message="<@U987654> help me",
             user_id="U123456",
+            channel_id="C123456",
             thread_ts="1234567890.123456",
         )
         mock_send.assert_called_once()

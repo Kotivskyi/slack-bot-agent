@@ -24,14 +24,12 @@ Manual Tests:
 - Write request to DB
 
 Improvements:
-- Task Queue (Celery): Retry, Scheduled Tasks, Daily Reports, Data Cleanup tasks, 
 - Reddis: Rate limits,  caching, Task Queues
-
 - Utilise Slack Threads
 - Slack Status
 - Streaming Reponses
 - Implement Streaming
-- Application Info DB is External + Validation
+- Analytics Info DB is External + Validation
 - Data retention policy
 
 - AWS cost limits
