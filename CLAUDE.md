@@ -18,8 +18,7 @@ make db-init          # Initialize database (start + migrate)
 make db-upgrade       # Apply migrations
 make db-migrate       # Create new migration
 
-# Or directly with uv (from backend/)
-cd backend
+# Or directly with uv
 uv run slack_analytics_app server run --reload
 uv run pytest
 uv run ruff check . --fix && uv run ruff format .
@@ -32,35 +31,35 @@ make docker-up        # Start all backend services
 ## Project Structure
 
 ```
-├── docs/                     # Documentation (project root)
+├── docs/                     # Documentation
 │   ├── database_skill.md     # Database & repository patterns
 │   ├── agent_architecture.md # Analytics chatbot docs
 │   ├── patterns.md           # General patterns
 │   ├── testing.md            # Testing guide
 │   └── ...
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/       # HTTP endpoints (health.py, slack.py)
-│   │   ├── services/         # Business logic (agent.py, slack.py)
-│   │   ├── repositories/     # Data access (checkpoint.py)
-│   │   ├── schemas/          # Pydantic models
-│   │   ├── db/models/        # Database models (checkpoint.py)
-│   │   ├── core/             # Config, middleware, logging
-│   │   ├── agents/           # AI agents
-│   │   │   ├── checkpointer.py       # PostgresCheckpointer
-│   │   │   ├── assistant/            # Generic agent (ReAct pattern)
-│   │   │   └── analytics_chatbot/    # Analytics SQL chatbot
-│   │   │       ├── graph.py          # LangGraph workflow
-│   │   │       ├── state.py          # ChatbotState, CacheEntry
-│   │   │       ├── prompts.py        # LLM prompts
-│   │   │       ├── routing.py        # Conditional routing
-│   │   │       └── nodes/            # Node implementations
-│   │   └── commands/         # CLI commands
-│   ├── evals/                # Agent evaluation (pydantic-evals)
-│   │   ├── main.py           # CLI: uv run python -m evals.main
-│   │   ├── dataset.py        # Test cases
-│   │   └── evaluator.py      # Custom evaluators
-│   └── Makefile              # Common commands
+├── app/
+│   ├── api/routes/           # HTTP endpoints (health.py, slack.py)
+│   ├── services/             # Business logic (agent.py, slack.py)
+│   ├── repositories/         # Data access (checkpoint.py)
+│   ├── schemas/              # Pydantic models
+│   ├── db/models/            # Database models (checkpoint.py)
+│   ├── core/                 # Config, middleware, logging
+│   ├── agents/               # AI agents
+│   │   ├── checkpointer.py   # PostgresCheckpointer
+│   │   ├── assistant/        # Generic agent (ReAct pattern)
+│   │   └── analytics_chatbot/# Analytics SQL chatbot
+│   │       ├── graph.py      # LangGraph workflow
+│   │       ├── state.py      # ChatbotState, CacheEntry
+│   │       ├── prompts.py    # LLM prompts
+│   │       ├── routing.py    # Conditional routing
+│   │       └── nodes/        # Node implementations
+│   └── commands/             # CLI commands
+├── evals/                    # Agent evaluation (pydantic-evals)
+│   ├── main.py               # CLI: uv run python -m evals.main
+│   ├── dataset.py            # Test cases
+│   └── evaluator.py          # Custom evaluators
+├── tests/                    # pytest test suite
+└── alembic/                  # Database migrations
 ```
 
 ## API Routes

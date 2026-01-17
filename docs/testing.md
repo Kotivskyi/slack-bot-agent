@@ -3,31 +3,29 @@
 ## Running Tests
 
 ```bash
-cd backend
-
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=app --cov-report=term-missing
+uv run pytest --cov=app --cov-report=term-missing
 
 # Run specific test file
-pytest tests/api/test_health.py -v
+uv run pytest tests/api/test_health.py -v
 
 # Run specific test
-pytest tests/api/test_health.py::test_health_check -v
+uv run pytest tests/api/test_health.py::test_health_check -v
 
 # Run only unit tests
-pytest tests/unit/
+uv run pytest tests/unit/
 
 # Run only integration tests
-pytest tests/integration/
+uv run pytest tests/integration/
 
 # Run with verbose output
-pytest -v
+uv run pytest -v
 
 # Stop on first failure
-pytest -x
+uv run pytest -x
 ```
 
 ## Test Structure

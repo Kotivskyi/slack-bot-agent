@@ -5,13 +5,11 @@ Agent evaluation using [pydantic-evals](https://ai.pydantic.dev/evals/).
 ## Quick Start
 
 ```bash
-cd backend
+# Run full evaluation
+uv run python -m evals.main
 
-# Run full evaluation (5 cases, 4 evaluators)
-make evals
-
-# Quick evaluation (2 cases, 1 evaluator)
-make evals-quick
+# Quick evaluation (fewer cases)
+uv run python -m evals.main --quick
 
 # With options
 uv run python -m evals.main --quick --no-report -v

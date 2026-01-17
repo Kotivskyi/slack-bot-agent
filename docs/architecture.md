@@ -10,7 +10,7 @@ HTTP Request → API Route → Service → Repository → Database
               Response ← Service ← Repository ←
 ```
 
-## Directory Structure (`backend/app/`)
+## Directory Structure (`app/`)
 
 | Directory | Purpose |
 |-----------|---------|

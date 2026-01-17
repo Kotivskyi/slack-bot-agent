@@ -64,13 +64,13 @@ class PostgresCheckpointer(BaseCheckpointSaver):
 
         if value is None:
             return None
-        elif isinstance(value, (str, int, float, bool)):
+        elif isinstance(value, str | int | float | bool):
             return value
         elif isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             return [self._serialize_value(item) for item in value]
-        elif isinstance(value, (BaseMessage, BaseModel)) or hasattr(value, "model_dump"):
+        elif isinstance(value, BaseMessage | BaseModel) or hasattr(value, "model_dump"):
             return value.model_dump()
         elif hasattr(value, "__dict__"):
             return self._serialize_value(value.__dict__)

@@ -2,9 +2,9 @@
 
 # === Setup ===
 install:
-	uv sync --directory backend --dev
+	uv sync --dev
 	@if git rev-parse --git-dir > /dev/null 2>&1; then \
-		uv run --directory backend pre-commit install; \
+		uv run pre-commit install; \
 	else \
 		echo "⚠️  Not a git repository - skipping pre-commit install"; \
 		echo "   Run 'git init && make install' to set up pre-commit hooks"; \
@@ -17,58 +17,58 @@ install:
 	@echo "  • make db-upgrade       # Apply migrations"
 	@echo "  • make run              # Start development server"
 	@echo ""
-	@echo "Note: backend/.env is pre-configured for development"
+	@echo "Note: .env is pre-configured for development"
 
 # === Code Quality ===
 format:
-	uv run --directory backend ruff format app tests cli
-	uv run --directory backend ruff check app tests cli --fix
+	uv run ruff format app tests cli
+	uv run ruff check app tests cli --fix
 
 lint:
-	uv run --directory backend ruff check app tests cli
-	uv run --directory backend ruff format app tests cli --check
-	uv run --directory backend mypy app
+	uv run ruff check app tests cli
+	uv run ruff format app tests cli --check
+	uv run mypy app
 
 # === Testing ===
 test:
-	uv run --directory backend pytest tests/ -v
+	uv run pytest tests/ -v
 
 test-cov:
-	uv run --directory backend pytest tests/ -v --cov=app --cov-report=html --cov-report=term-missing
+	uv run pytest tests/ -v --cov=app --cov-report=html --cov-report=term-missing
 
 # === Database ===
 db-init: docker-db
 	@echo "Waiting for PostgreSQL to be ready..."
 	@sleep 3
-	uv run --directory backend slack_analytics_app db upgrade
+	uv run slack_analytics_app db upgrade
 	@echo ""
 	@echo "✅ Database initialized!"
 
 db-migrate:
 	@read -p "Migration message: " msg; \
-	uv run --directory backend slack_analytics_app db migrate -m "$$msg"
+	uv run slack_analytics_app db migrate -m "$$msg"
 
 db-upgrade:
-	uv run --directory backend slack_analytics_app db upgrade
+	uv run slack_analytics_app db upgrade
 
 db-downgrade:
-	uv run --directory backend slack_analytics_app db downgrade
+	uv run slack_analytics_app db downgrade
 
 db-current:
-	uv run --directory backend slack_analytics_app db current
+	uv run slack_analytics_app db current
 
 db-history:
-	uv run --directory backend slack_analytics_app db history
+	uv run slack_analytics_app db history
 
 # === Server ===
 run:
-	uv run --directory backend slack_analytics_app server run --reload
+	uv run slack_analytics_app server run --reload
 
 run-prod:
-	uv run --directory backend slack_analytics_app server run --host 0.0.0.0 --port 8000
+	uv run slack_analytics_app server run --host 0.0.0.0 --port 8000
 
 routes:
-	uv run --directory backend slack_analytics_app server routes
+	uv run slack_analytics_app server routes
 
 # === Docker: Backend (Development) ===
 docker-up:

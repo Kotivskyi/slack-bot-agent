@@ -8,16 +8,16 @@
 services:
   app:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
     container_name: slack_analytics_app_backend
     ports:
       - "8000:8000"
     volumes:
-      - ./backend/app:/app/app:ro
-      - ./backend/cli:/app/cli:ro
+      - ./app:/app/app:ro
+      - ./cli:/app/cli:ro
     env_file:
-      - ./backend/.env
+      - ./.env
     environment:
       - DEBUG=true
       - ENVIRONMENT=local

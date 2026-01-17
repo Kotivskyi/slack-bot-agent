@@ -104,4 +104,4 @@ logs/
 Thumbs.db
 
 # Project specific
-backend/evals/reports/
+evals/reports/

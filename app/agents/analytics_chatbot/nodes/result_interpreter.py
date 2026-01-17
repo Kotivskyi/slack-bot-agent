@@ -46,7 +46,7 @@ def interpret_results(state: ChatbotState) -> dict[str, Any]:
         is_simple = (
             row_count == 1
             and len(columns) <= 2
-            and all(isinstance(results[0].get(c), (int, float, str, type(None))) for c in columns)
+            and all(isinstance(results[0].get(c), int | float | str | None) for c in columns)
         )
 
         response_format = "simple" if is_simple else "table"

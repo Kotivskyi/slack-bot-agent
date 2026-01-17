@@ -14,7 +14,6 @@ FastAPI application with LangGraph AI agents and PostgreSQL state persistence.
 
 ```bash
 # Install dependencies
-cd backend
 uv sync --dev
 
 # Start PostgreSQL
@@ -72,18 +71,15 @@ SLACK_SIGNING_SECRET=your-secret
 ## Commands
 
 ```bash
-cd backend
-
 # Using Make (recommended)
-make dev              # Start dev server
+make run              # Start dev server
 make test             # Run tests
-make check            # Lint + format
-make migrate          # Apply migrations
-make evals            # Run evaluations
-make evals-quick      # Run quick evaluation (5 traces)
+make lint             # Check code quality
+make format           # Auto-format code
+make db-upgrade       # Apply migrations
 
 # Or directly with uv
-uv run uvicorn app.main:app --reload --port 8000
+uv run slack_analytics_app server run --reload
 uv run pytest
 uv run ruff check . --fix && uv run ruff format .
 uv run alembic upgrade head
@@ -165,7 +161,6 @@ The backend follows a **Repository + Service** pattern:
 ## Project Structure
 
 ```
-backend/
 ├── app/
 │   ├── main.py              # FastAPI app with lifespan
 │   ├── api/
@@ -195,7 +190,8 @@ backend/
 │   ├── evaluator.py         # Custom evaluators and LLM judges
 │   └── schemas.py           # AgentInput, AgentOutput types
 ├── tests/                   # pytest test suite
-└── alembic/                 # Database migrations
+├── alembic/                 # Database migrations
+└── docs/                    # Documentation
 ```
 
 ## Key Conventions
@@ -209,13 +205,7 @@ backend/
 Agent evaluation framework using [pydantic-evals](https://ai.pydantic.dev/evals/).
 
 ```bash
-cd backend
-
-# Using Make
-make evals            # Full evaluation (5 cases, 4 evaluators)
-make evals-quick      # Quick mode (2 cases, 1 evaluator)
-
-# Or directly with uv
+# Using uv
 uv run python -m evals.main
 uv run python -m evals.main --quick
 uv run python -m evals.main --no-report
