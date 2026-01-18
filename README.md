@@ -10,6 +10,8 @@ A FastAPI application with LangGraph AI agents for Slack-based analytics queries
 - **CSV Export** - Export query results with a button click
 - **Evals Framework** - Evaluate agent responses with pydantic-evals
 
+See [Future Improvements](docs/Future%20Improvements.md) for roadmap and upcoming features.
+
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
