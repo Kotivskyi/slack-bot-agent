@@ -377,8 +377,8 @@ graph TB
     end
 
     subgraph "Backend (FastAPI)"
-        Events[/slack/events]
-        Interactions[/slack/interactions]
+        Events["/slack/events"]
+        Interactions["/slack/interactions"]
         SlackService[SlackService]
         AnalyticsAgent[AnalyticsAgentService]
         Checkpointer[PostgresCheckpointer]
