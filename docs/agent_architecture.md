@@ -4,7 +4,7 @@ This document describes the LangGraph-based analytics chatbot architecture for t
 
 ## Overview
 
-The analytics chatbot converts natural language questions into SQL queries, executes them against the app_metrics database, and returns intelligently formatted responses via Slack. It uses a multi-node workflow pattern with intent routing, caching, conversation history persistence, and Block Kit formatting.
+The analytics chatbot converts natural language questions into SQL queries, executes them against the app_metrics database, and returns intelligently formatted responses via Slack. It uses a multi-node workflow pattern with intent routing, execution retry with LLM reflection, conversation history persistence, and Block Kit formatting.
 
 ## Architecture Diagram
 
@@ -17,20 +17,17 @@ User Message → Intent Router → [Route by Intent]
 analytics_query / follow_up   export_csv/show_sql              off_topic
     │                               │                               │
     ▼                               ▼                               ▼
-Context Resolver            Cached Operations                   Decline
+Context Resolver            Re-execute from DB                  Decline
     │                               │                               │
-    ▼                               │                               │
-SQL Generator                       │                               │
-    │                               │                               │
-    ▼                               │                               │
-SQL Validator ──(retry)──► SQL Generator                            │
-    │                               │                               │
+    ▼                               ▼                               │
+SQL Generator ◄──(retry)───┐       │                               │
+    │                      │       │                               │
+    ▼                      │       │                               │
+SQL Executor ──(error)─────┤       │                               │
+    │                      │       │                               │
     │──(max retries)──► Error Handler ─────────────────────────────┤
     │                               │                               │
-    ▼ (valid)                       │                               │
-SQL Executor + Cache                │                               │
-    │                               │                               │
-    ▼                               │                               │
+    ▼ (success)                     │                               │
 Result Interpreter                  │                               │
     │                               │                               │
     ▼                               │                               │
@@ -46,7 +43,7 @@ Save to Conversation History → Send to Slack
 app/agents/analytics_chatbot/
 ├── __init__.py                 # Public exports
 ├── graph.py                    # LangGraph workflow definition
-├── state.py                    # ChatbotState and CacheEntry types
+├── state.py                    # ChatbotState type
 ├── prompts.py                  # All LLM prompts
 ├── routing.py                  # Conditional routing functions
 └── nodes/                      # Node implementations
@@ -54,8 +51,7 @@ app/agents/analytics_chatbot/
     ├── intent_router.py        # classify_intent()
     ├── context_resolver.py     # resolve_context()
     ├── sql_generator.py        # generate_sql()
-    ├── sql_validator.py        # validate_sql()
-    ├── sql_executor.py         # execute_and_cache()
+    ├── sql_executor.py         # execute_sql()
     ├── result_interpreter.py   # interpret_results()
     ├── response_formatter.py   # format_slack_response()
     ├── csv_export.py           # export_csv()
@@ -90,16 +86,14 @@ class ChatbotState(TypedDict):
 
     # SQL pipeline
     generated_sql: str
-    sql_valid: bool
     sql_error: str | None
     retry_count: int
     query_results: list[dict[str, Any]]
     row_count: int
     column_names: list[str]
 
-    # Caching
-    query_cache: dict[str, CacheEntry]
-    current_query_id: str
+    # Query tracking
+    current_query_id: str | None
 
     # Response
     response_format: Literal["simple", "table", "error"]
@@ -140,48 +134,45 @@ Converts natural language to SQL using:
 - Database schema documentation (`DB_SCHEMA` constant)
 - Few-shot examples (`FEW_SHOT_EXAMPLES`)
 - JSON output format with fallback regex extraction
+- Built-in safety rules to prevent dangerous operations
 
-On retry (after validation failure), uses `SQL_RETRY_PROMPT` with the previous SQL and error message.
+**Safety Rules (in prompt):**
+- Generate ONLY SELECT or WITH statements
+- NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
+- Query must start with SELECT or WITH
 
-### 2. SQL Validator
+On retry (after execution failure), uses `SQL_RETRY_PROMPT` with the previous SQL and error message, including reflection guidance for common error patterns.
 
-Validates generated SQL (no LLM required):
-- Checks for dangerous keywords: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
-- Verifies SELECT-only (or WITH) queries
-- Parses with sqlparse for syntax validation
+### 2. SQL Executor
 
-### 3. SQL Executor
-
-Executes validated SQL and caches results:
-- Executes via `AnalyticsRepository.execute_raw_query()`
+Executes SQL and handles errors:
+- Executes via `AnalyticsRepository.execute_query()`
 - Converts database values to JSON-serializable format
 - Generates 8-character query ID from MD5 hash of SQL
-- Maintains cache of last 10 queries per session
+- On success: returns results with `sql_error: None`
+- On failure: returns `sql_error` with error message for retry routing
 
-### 4. Error Handler
+### 3. Error Handler
 
 Handles SQL generation failures after max retries:
 - Generates user-friendly messages based on error type
 - Suggests rephrasing for parse errors
 - No LLM required
 
-## Caching Mechanism
+## Execution Retry Flow
 
-Query results are cached per conversation thread to enable:
+When SQL execution fails, the chatbot retries with LLM reflection:
 
-1. **Cost Optimization**: CSV export and SQL retrieval don't require LLM calls
-2. **Session Continuity**: Previous results accessible via buttons
-3. **Follow-up Questions**: Context available for reference resolution
-
-Cache structure:
-```python
-class CacheEntry(TypedDict):
-    sql: str                        # The SQL query
-    results: list[dict[str, Any]]   # Query results
-    timestamp: datetime             # When executed
-    natural_query: str              # Original question
-    assumptions: list[str]          # Assumptions made
-```
+1. **SQL Executor** catches the error and sets `sql_error`
+2. **Routing** checks `sql_error` and `retry_count`:
+   - If error and `retry_count < 3`: route to `sql_generator`
+   - If error and `retry_count >= 3`: route to `error_response`
+   - If no error: route to `interpreter`
+3. **SQL Generator** (on retry) uses `SQL_RETRY_PROMPT` with:
+   - Original query
+   - Previous SQL that failed
+   - Error message
+   - Reflection guidance for common issues
 
 ## Conversation History Persistence
 
@@ -239,9 +230,9 @@ When users click Export CSV or Show SQL buttons:
 
 1. **SlackService.handle_button_action()** receives the action
 2. Query ID is extracted from button value
-3. For cached queries: Results retrieved from in-memory cache
-4. For expired cache: SQL is retrieved from `conversation_turns` table and re-executed
-5. Response is generated without LLM calls
+3. SQL is retrieved from `conversation_turns` table
+4. Query is re-executed using AnalyticsRepository
+5. Response is generated directly (CSV export or SQL display)
 
 ## Routing Logic
 
@@ -253,11 +244,11 @@ Maps intents to their target nodes:
 - `show_sql` → `sql_retrieval`
 - `off_topic` → `decline`
 
-### route_after_validation()
-Routes after SQL validation:
-- `sql_valid=True` → `executor`
-- `sql_valid=False` and `retry_count < 2` → `sql_generator` (retry)
-- `sql_valid=False` and `retry_count >= 2` → `error_response`
+### route_after_execution()
+Routes after SQL execution:
+- `sql_error=None` → `interpreter` (success)
+- `sql_error` and `retry_count < 3` → `sql_generator` (retry)
+- `sql_error` and `retry_count >= 3` → `error_response` (max retries)
 
 ## Adding New Intents
 
@@ -302,12 +293,10 @@ async with get_db_context() as db:
         channel_id="C12345",
         thread_ts="1234567890.123456",
         conversation_history=[...],  # Previous turns
-        query_cache={...},           # Cached queries
     )
     # response.text - Response text
     # response.slack_blocks - Slack Block Kit blocks
     # response.intent - Classified intent
-    # response.query_cache - Updated cache
     # response.conversation_history - Updated history
     # response.csv_content - CSV data (if export)
     # response.csv_filename - CSV filename (if export)
@@ -342,8 +331,7 @@ async def generate_analytics_response(channel_id, thread_ts, user_id, text):
 
 # Button click handling
 async def handle_button_action(action_id, value, thread_ts):
-    # Rebuilds query_cache from stored SQL if needed
-    # Returns CSV content or SQL display
+    # Retrieves SQL from conversation_turns, re-executes, returns result
 ```
 
 Additional methods:
@@ -355,8 +343,7 @@ All nodes are instrumented with Logfire spans:
 - `classify_intent`: Intent classification
 - `resolve_context`: Context resolution
 - `generate_sql`: SQL generation
-- `validate_sql`: SQL validation
-- `execute_and_cache`: Query execution
+- `execute_sql`: Query execution
 - `interpret_results`: Result interpretation
 - `format_slack_response`: Response formatting
 - `export_csv`: CSV export
@@ -370,10 +357,10 @@ All nodes are instrumented with Logfire spans:
 |------------|-----------|
 | New analytics question | 4 (intent + context + SQL + interpret) |
 | Follow-up question | 4 (intent + context + SQL + interpret) |
-| CSV export | 0 |
-| Show SQL | 0 |
+| CSV export | 0 (re-execute from DB) |
+| Show SQL | 0 (retrieve from DB) |
 | Off-topic | 1 (intent only) |
-| Failed SQL (after retries) | 3-4 (intent + context + SQL attempts) |
+| Failed SQL (after retries) | 3-5 (intent + context + SQL attempts) |
 
 ## LLM Prompts
 
@@ -383,8 +370,8 @@ Five prompts are defined in `prompts.py`:
 |--------|---------|
 | `INTENT_CLASSIFIER_PROMPT` | Classifies user intent (5 categories) |
 | `CONTEXT_RESOLVER_PROMPT` | Resolves follow-up references using history |
-| `SQL_GENERATOR_PROMPT` | Generates SQL from natural language |
-| `SQL_RETRY_PROMPT` | Fixes invalid SQL based on error message |
+| `SQL_GENERATOR_PROMPT` | Generates SQL from natural language (with safety rules) |
+| `SQL_RETRY_PROMPT` | Fixes invalid SQL based on error message (with reflection) |
 | `INTERPRETER_PROMPT` | Generates natural language response from results |
 
 Supporting constants:

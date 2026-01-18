@@ -1,18 +1,17 @@
 """SQL executor node for the analytics chatbot.
 
-Executes validated SQL and caches results for later retrieval.
+Executes SQL and returns results or errors for retry routing.
 No LLM calls - pure database operations via repository.
 """
 
 import hashlib
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import logfire
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.analytics_chatbot.state import CacheEntry, ChatbotState
+from app.agents.analytics_chatbot.state import ChatbotState
 
 if TYPE_CHECKING:
     from app.repositories import AnalyticsRepository
@@ -20,15 +19,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def execute_and_cache(
+async def execute_sql(
     state: ChatbotState,
     db: AsyncSession,
     repository: "AnalyticsRepository",
 ) -> dict[str, Any]:
-    """Execute SQL query and cache results.
+    """Execute SQL query and return results.
 
-    Caching enables cost-effective CSV export and SQL retrieval
-    without regenerating queries.
+    On success, returns results with sql_error=None.
+    On failure, returns sql_error for retry routing.
 
     Args:
         state: Current chatbot state with generated_sql.
@@ -37,39 +36,21 @@ async def execute_and_cache(
 
     Returns:
         Dict with query_results, row_count, column_names, current_query_id,
-        and updated query_cache.
+        and sql_error (None on success, error message on failure).
     """
     sql = state.get("generated_sql", "")
     sql_hash = hashlib.md5(sql.encode()).hexdigest()[:8]
 
-    with logfire.span("execute_and_cache", sql_hash=sql_hash):
+    with logfire.span("execute_sql", sql_hash=sql_hash):
         try:
             # Execute query via the repository
             rows, columns = await repository.execute_query(db, sql)
 
-            # Generate cache key from SQL hash
+            # Generate query ID from SQL hash (useful for button references)
             query_id = sql_hash
 
-            # Build cache entry
-            cache_entry: CacheEntry = {
-                "sql": sql,
-                "results": rows,
-                "timestamp": datetime.now(),
-                "natural_query": state.get("resolved_query") or state.get("user_query", ""),
-                "assumptions": state.get("assumptions_made", []),
-            }
-
-            # Update cache (keep last 10 queries per session)
-            updated_cache = dict(state.get("query_cache", {}))
-            updated_cache[query_id] = cache_entry
-
-            # Prune old entries if cache too large
-            if len(updated_cache) > 10:
-                oldest_key = min(updated_cache, key=lambda k: updated_cache[k]["timestamp"])
-                del updated_cache[oldest_key]
-
             logfire.info(
-                "Query executed and cached",
+                "Query executed successfully",
                 query_id=query_id,
                 row_count=len(rows),
                 columns=columns,
@@ -80,7 +61,6 @@ async def execute_and_cache(
                 "row_count": len(rows),
                 "column_names": columns,
                 "current_query_id": query_id,
-                "query_cache": updated_cache,
                 "sql_error": None,
             }
 

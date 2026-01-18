@@ -24,35 +24,32 @@ User Message → Intent Router → [Route by Intent]
     ┌───────────────────────────────┼───────────────────────────────┐
     │                               │                               │
     ▼                               ▼                               ▼
-analytics_query              follow_up                    export_csv/show_sql/off_topic
+analytics_query / follow_up   export_csv/show_sql              off_topic
     │                               │                               │
-    │                               ▼                               │
-    │                        Context Resolver                       │
-    │                         (reads history)                       │
+    ▼                               ▼                               ▼
+Context Resolver            Re-execute from DB                  Decline
     │                               │                               │
-    └───────────────┬───────────────┘                               │
-                    ▼                                               │
-              SQL Generator                                         │
-                    │                                               │
-                    ▼                                               │
-              SQL Validator ──(invalid)──► Retry (max 2)            │
-                    │          ──(max retries)──► Error Handler ────┤
-                    ▼ (valid)                                       │
-              SQL Executor                                          │
-                    │                                               │
-                    ▼                                               │
-           Result Interpreter                                       │
-                    │                                               │
-                    ▼                                               │
-           Response Formatter ◄─────────────────────────────────────┘
-             (Slack Block Kit)               (reads SQL from history,
-                    │                         re-executes for export)
-                    ▼
-             Send to Slack
+    ▼                               ▼                               │
+SQL Generator ◄──(retry)───┐       │                               │
+    │                      │       │                               │
+    ▼                      │       │                               │
+SQL Executor ──(error)─────┤       │                               │
+    │                      │       │                               │
+    │──(max retries)──► Error Handler ─────────────────────────────┤
+    │                               │                               │
+    ▼ (success)                     │                               │
+Result Interpreter                  │                               │
+    │                               │                               │
+    ▼                               │                               │
+Response Formatter ◄────────────────┴───────────────────────────────┘
+ (Slack Block Kit)               (reads SQL from history,
+    │                             re-executes for export)
+    ▼
+Send to Slack
 ```
 
 **Data Flow:**
-- `conversation_history` → read by Intent Router, Context Resolver, CSV Export, SQL Retrieval
+- `conversation_history` → read by Intent Router, Context Resolver
 - SQL stored directly in conversation turns, re-executed when needed for export
 
 ### Example Thread Flow
@@ -73,14 +70,14 @@ analytics_query              follow_up                    export_csv/show_sql/of
 │     └─► Bot: "We have 10 iOS apps"                                  │
 │         └─► Saved to conversation_turns with SQL                    │
 │                                                                     │
-│  Turn 3: "export as csv"                                            │
+│  Turn 3: [Export CSV button click]                                  │
 │     └─► Reads SQL from most recent turn in conversation_turns       │
 │     └─► Re-executes SQL query                                       │
 │     └─► Returns CSV file                                            │
 │                                                                     │
-│  Turn 4: "show SQL for the first question"                          │
-│     └─► Searches conversation_turns for "Android apps"              │
-│     └─► Returns SQL from that turn                                  │
+│  Turn 4: [Show SQL button click]                                    │
+│     └─► Reads SQL from most recent turn in conversation_turns       │
+│     └─► Returns SQL as code block                                   │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -336,25 +333,25 @@ resolved_query = context_resolver(
 # → "What's our revenue by country for Q4?"
 ```
 
-### 3. CSV Export
+### 3. CSV Export (Button Click)
 
 ```python
-# User: "export as csv"
+# User clicks "Export CSV" button
 # Intent: export_csv
 
-# For button clicks: query_cache is rebuilt by re-executing stored SQL
-# For text commands: uses in-session query_cache or most recent SQL from DB
+# SlackService retrieves most recent SQL from conversation_turns
+# Re-executes SQL to get fresh results
+# Generates and uploads CSV file
 ```
 
-### 4. Show SQL
+### 4. Show SQL (Button Click)
 
 ```python
-# User: "show me the SQL"
+# User clicks "Show SQL" button
 # Intent: show_sql
 
-# Retrieves SQL from query_cache (in-session) or conversation_turns (DB)
-# Supports ordinal references: "first", "second", "last", "previous"
-# Supports keyword search: "show SQL for the Android question"
+# SlackService retrieves most recent SQL from conversation_turns
+# Returns SQL as a code block in Slack
 ```
 
 ---
@@ -399,27 +396,17 @@ async def generate_analytics_response(
             channel_id=channel_id,
             thread_ts=thread_ts,
             conversation_history=conversation_history,
-            query_cache={},  # Rebuilt per request through graph execution
         )
 
-    # 3. Save new turn to DB (extract SQL from query_cache)
+    # 3. Save new turn to DB
     async with get_db_context() as db:
-        sql_query = None
-        query_cache = response.query_cache or {}
-        if query_cache:
-            # Get the most recent cache entry by timestamp
-            most_recent = max(
-                query_cache.values(), key=lambda x: x.get("timestamp", datetime.min)
-            )
-            sql_query = most_recent.get("sql")
-
         await repo.add_turn(
             db,
             thread_id=thread_id,
             user_message=message,
             bot_response=response.text,
             intent=response.intent or "unknown",
-            sql_query=sql_query,
+            sql_query=response.generated_sql,
         )
 
     return {
@@ -445,69 +432,59 @@ async def handle_button_action(
     channel_id: str,
     thread_ts: str,
 ) -> dict[str, Any]:
-    """Handle button action from Slack interactive component."""
+    """Handle button action from Slack interactive component.
+
+    For button clicks, we handle directly without LLM calls:
+    - Show SQL: Retrieve SQL from conversation_turns, return as code block
+    - Export CSV: Retrieve SQL, re-execute, generate CSV
+    """
     from app.db.session import get_analytics_db_context, get_db_context
-    from app.repositories import AnalyticsRepository, ConversationRepository, turns_to_history
-    from app.services.agent import AnalyticsAgentService
+    from app.repositories import AnalyticsRepository, ConversationRepository
 
     thread_id = f"slack_thread_{thread_ts}"
 
-    # Create appropriate user query based on action
-    if action_id == "export_csv":
-        user_query = "export csv"
-    elif action_id == "show_sql":
-        user_query = "show sql"
-    else:
-        return {"text": f"Unknown action: {action_id}", "blocks": None}
-
-    # 1. Load history from DB
+    # 1. Get the most recent SQL from conversation history
     async with get_db_context() as db:
         repo = ConversationRepository()
-        turns = await repo.get_recent_turns(db, thread_id, limit=10)
-        conversation_history = turns_to_history(turns)
+        sql_query = await repo.get_most_recent_sql(db, thread_id)
 
-    # 2. Rebuild query_cache by re-executing SQL for turns that have SQL
-    # This is needed because CSV export requires the actual results data
-    query_cache: dict[str, Any] = {}
-    async with get_analytics_db_context() as analytics_db:
-        analytics_repo = AnalyticsRepository()
-        for i, turn in enumerate(turns):
-            if turn.sql_query:
-                try:
-                    rows, _columns = await analytics_repo.execute_query(
-                        analytics_db, turn.sql_query
-                    )
-                    # Use index-based key to allow referencing specific queries
-                    query_id = f"turn_{i}"
-                    query_cache[query_id] = {
-                        "sql": turn.sql_query,
-                        "results": rows,
-                        "timestamp": turn.created_at,
-                        "natural_query": turn.user_message,
-                        "assumptions": [],
-                    }
-                except Exception as e:
-                    logger.warning(f"Failed to re-execute SQL for turn {i}: {e}")
+    if not sql_query:
+        return {"text": "No SQL queries in history. Please ask a question first!", "blocks": None}
 
-        # 3. Run analytics agent with rebuilt cache
-        analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
-        response = await analytics_service.run(
-            user_query=user_query,
-            thread_id=thread_id,
-            user_id=user_id,
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            conversation_history=conversation_history,
-            query_cache=query_cache,
-        )
+    # 2. Handle action based on type
+    if action_id == "show_sql":
+        # Just return the SQL - no execution needed
+        return {
+            "text": "*SQL Query*",
+            "blocks": [
+                {"type": "section", "text": {"type": "mrkdwn", "text": "*SQL Query*"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": f"```sql\n{sql_query}\n```"}},
+            ],
+        }
 
-    return {
-        "text": response.text,
-        "blocks": response.slack_blocks,
-        "csv_content": response.csv_content,
-        "csv_filename": response.csv_filename,
-        "csv_title": response.csv_title,
-    }
+    elif action_id == "export_csv":
+        # Re-execute the SQL to get fresh results
+        async with get_analytics_db_context() as analytics_db:
+            analytics_repo = AnalyticsRepository()
+            rows, _columns = await analytics_repo.execute_query(analytics_db, sql_query)
+
+        if not rows:
+            return {"text": "The query returned no data to export.", "blocks": None}
+
+        # Generate CSV content
+        import csv
+        import io
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+        return {
+            "text": f"*CSV Export Complete*\n_{len(rows)} rows exported_",
+            "blocks": [...],
+            "csv_content": csv_buffer.getvalue(),
+            "csv_filename": f"export_{datetime.now():%Y%m%d_%H%M%S}.csv",
+        }
 ```
 
 ---
@@ -578,20 +555,20 @@ history_for_context = conversation_history[-5:]
 ## Summary
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                    THREAD STATE                            │
-│              (Stored in PostgreSQL)                        │
-├────────────────────────────────────────────────────────────┤
-│                                                            │
-│  conversation_turns table (last 10 per thread)             │
-│  ├── Used by: intent_router.py, context_resolver.py,       │
-│  │            csv_export.py, sql_retrieval.py              │
-│  ├── Contains: user query, truncated bot response, SQL     │
-│  ├── Purpose: Context resolution + serve export/SQL        │
-│  │            requests by re-executing stored SQL          │
-│  └── TTL: 24 hours (cleanup_old_turns)                     │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                    THREAD STATE                                │
+│              (Stored in PostgreSQL)                            │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  conversation_turns table (last 10 per thread)                 │
+│  ├── Used by: intent_router.py, context_resolver.py,          │
+│  │            SlackService (button actions)                    │
+│  ├── Contains: user query, truncated bot response, SQL         │
+│  ├── Purpose: Context resolution + serve export/SQL            │
+│  │            requests by re-executing stored SQL              │
+│  └── TTL: 24 hours (cleanup_old_turns)                         │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### Alignment with Architecture
@@ -604,7 +581,7 @@ history_for_context = conversation_history[-5:]
 | `nodes/intent_router.py` | Reads `conversation_history` for follow-up detection |
 | `nodes/context_resolver.py` | Reads `conversation_history` for reference expansion |
 | `nodes/sql_executor.py` | SQL stored via SlackService after graph completes |
-| `nodes/csv_export.py` | Reads from `query_cache` (rebuilt from DB) |
-| `nodes/sql_retrieval.py` | Reads from `query_cache` (rebuilt from DB) |
-| `AnalyticsAgentService` | Orchestrates graph execution with history/cache |
-| `SlackService` | Manages DB persistence + button action cache rebuilding |
+| `nodes/csv_export.py` | Uses `query_results` from state (pre-populated for buttons) |
+| `nodes/sql_retrieval.py` | Uses `generated_sql` from state (pre-populated for buttons) |
+| `AnalyticsAgentService` | Orchestrates graph execution with history |
+| `SlackService` | Manages DB persistence + direct button action handling |

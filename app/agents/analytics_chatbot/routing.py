@@ -33,24 +33,26 @@ def route_by_intent(
     return routing.get(intent, "decline")
 
 
-def route_after_validation(
+def route_after_execution(
     state: ChatbotState,
-) -> Literal["executor", "sql_generator", "error_response"]:
-    """Route based on SQL validation result.
+) -> Literal["interpreter", "sql_generator", "error_response"]:
+    """Route based on SQL execution result.
 
     Args:
-        state: Current chatbot state with SQL validation results.
+        state: Current chatbot state with SQL execution results.
 
     Returns:
         Name of the next node to execute.
     """
-    if state.get("sql_valid", False):
-        return "executor"
+    sql_error = state.get("sql_error")
+
+    if not sql_error:
+        return "interpreter"  # Success
 
     # Retry logic with error context
     retry_count = state.get("retry_count", 0)
 
-    if retry_count < 2:  # Allow 2 retries
+    if retry_count < 3:  # Allow 3 retries
         return "sql_generator"
 
     return "error_response"

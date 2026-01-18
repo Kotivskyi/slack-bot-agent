@@ -43,8 +43,8 @@ class AnalyticsResponse:
         text: Response text for Slack message.
         slack_blocks: Slack Block Kit blocks for rich formatting.
         intent: Classified intent of the user query.
-        query_cache: Updated query cache for session state.
         conversation_history: Updated conversation history.
+        generated_sql: The SQL query if one was generated.
         csv_content: CSV content if export was requested.
         csv_filename: Filename for CSV export.
         csv_title: Title for CSV file.
@@ -53,8 +53,8 @@ class AnalyticsResponse:
     text: str
     slack_blocks: list[dict] | None = None
     intent: str | None = None
-    query_cache: dict | None = None
     conversation_history: list[dict] | None = None
+    generated_sql: str | None = None
     csv_content: str | None = None
     csv_filename: str | None = None
     csv_title: str | None = None
@@ -378,7 +378,6 @@ class AnalyticsAgentService:
         channel_id: str = "",
         thread_ts: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
-        query_cache: dict | None = None,
     ) -> AnalyticsResponse:
         """Run the analytics chatbot for a user query.
 
@@ -389,7 +388,6 @@ class AnalyticsAgentService:
             channel_id: Slack channel ID.
             thread_ts: Slack thread timestamp.
             conversation_history: Previous Q&A pairs in session.
-            query_cache: Cached query results from previous runs.
 
         Returns:
             AnalyticsResponse with text, blocks, and updated state.
@@ -403,7 +401,6 @@ class AnalyticsAgentService:
             channel_id=channel_id,
             thread_ts=thread_ts,
             conversation_history=conversation_history,
-            query_cache=query_cache,
         )
 
         # Use conversation_history from graph result (updated by terminal nodes)
@@ -411,8 +408,8 @@ class AnalyticsAgentService:
             text=result.get("response_text", ""),
             slack_blocks=result.get("slack_blocks"),
             intent=result.get("intent"),
-            query_cache=result.get("query_cache", {}),
             conversation_history=result.get("conversation_history", []),
+            generated_sql=result.get("generated_sql"),
             csv_content=result.get("csv_content"),
             csv_filename=result.get("csv_filename"),
             csv_title=result.get("csv_title"),

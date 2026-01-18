@@ -3,25 +3,10 @@
 Contains TypedDict definitions for the chatbot state that flows through the graph.
 """
 
-from datetime import datetime
 from typing import Annotated, Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
-
-
-class CacheEntry(TypedDict):
-    """Structure for cached query results.
-
-    Stores SQL queries and their results for cost-effective retrieval
-    (CSV export, Show SQL) without regenerating queries.
-    """
-
-    sql: str
-    results: list[dict[str, Any]]
-    timestamp: datetime
-    natural_query: str
-    assumptions: list[str]
 
 
 class ChatbotState(TypedDict):
@@ -57,16 +42,14 @@ class ChatbotState(TypedDict):
 
     # ===== SQL Pipeline =====
     generated_sql: str | None  # The SQL query generated
-    sql_valid: bool  # Validation result
-    sql_error: str | None  # Error message if invalid
+    sql_error: str | None  # Error message if execution failed
     retry_count: int  # Number of SQL generation retries
     query_results: list[dict[str, Any]] | None  # Raw query results
     row_count: int  # Number of rows returned
     column_names: list[str]  # Column headers
 
-    # ===== Caching (Cost Optimization) =====
-    query_cache: dict[str, CacheEntry]  # Maps query_id -> cached data
-    current_query_id: str | None  # ID of current/most recent query
+    # ===== Query Tracking =====
+    current_query_id: str | None  # ID of current/most recent query (MD5 hash)
 
     # ===== Response Generation =====
     response_format: Literal["simple", "table", "error"]

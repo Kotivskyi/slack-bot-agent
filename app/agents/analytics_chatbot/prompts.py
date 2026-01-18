@@ -189,12 +189,16 @@ DATABASE SCHEMA:
 EXAMPLES:
 {examples}
 
-RULES:
-1. Generate ONLY SELECT statements (no INSERT, UPDATE, DELETE, DROP)
-2. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
-3. Include meaningful column aliases
-4. Add LIMIT for potentially large result sets
-5. Note any assumptions made about ambiguous terms
+SAFETY RULES (CRITICAL):
+1. Generate ONLY SELECT or WITH statements
+2. NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
+3. Query must start with SELECT or WITH - no other statement types allowed
+
+GENERATION RULES:
+1. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
+2. Include meaningful column aliases
+3. Add LIMIT for potentially large result sets
+4. Note any assumptions made about ambiguous terms
 
 Return JSON format:
 {{
@@ -248,17 +252,30 @@ SQL_RETRY_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You are an expert SQL generator. The previous SQL query failed validation.
+            """You are an expert SQL generator. The previous SQL query failed execution.
 Fix the query based on the error message provided.
 
 DATABASE SCHEMA:
 {schema}
 
-RULES:
-1. Generate ONLY SELECT statements (no INSERT, UPDATE, DELETE, DROP)
-2. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
-3. Include meaningful column aliases
-4. Add LIMIT for potentially large result sets
+REFLECTION ON ERROR:
+Analyze the error carefully. Common issues include:
+- Column does not exist: Check column names against schema above
+- Syntax error: Check SQL syntax (commas, quotes, keywords)
+- Type mismatch: Ensure correct data types in comparisons
+- Ambiguous column: Add table prefix to column names
+- Division by zero: Add NULLIF or CASE WHEN guards
+- Invalid date: Check date format (use 'YYYY-MM-DD')
+
+SAFETY RULES (CRITICAL):
+1. Generate ONLY SELECT or WITH statements
+2. NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
+3. Query must start with SELECT or WITH - no other statement types allowed
+
+GENERATION RULES:
+1. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
+2. Include meaningful column aliases
+3. Add LIMIT for potentially large result sets
 
 Return JSON format:
 {{

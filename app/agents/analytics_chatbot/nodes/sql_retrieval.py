@@ -1,7 +1,7 @@
 """SQL retrieval node for the analytics chatbot.
 
-Retrieves SQL from cache without regenerating.
-No LLM calls - retrieves from cache for cost efficiency.
+Retrieves SQL from state (pre-populated by SlackService for button clicks).
+No LLM calls - uses generated_sql from state.
 """
 
 import logging
@@ -27,21 +27,22 @@ def _update_history(state: ChatbotState, response_text: str) -> list[dict[str, s
 
 
 def retrieve_sql(state: ChatbotState) -> dict[str, Any]:
-    """Retrieve SQL statement from cache.
+    """Retrieve SQL statement from state.
 
-    NO LLM CALL - retrieves from cache for cost efficiency.
+    NO LLM CALL - uses generated_sql from state.
+    For button clicks, SlackService pre-populates generated_sql from DB.
 
     Args:
-        state: Current chatbot state with query_cache and user_query.
+        state: Current chatbot state with generated_sql.
 
     Returns:
         Dict with response_text and slack_blocks fields.
     """
     with logfire.span("retrieve_sql"):
-        cache = state.get("query_cache", {})
+        sql = state.get("generated_sql")
 
-        if not cache:
-            logfire.warn("SQL retrieval requested but no cache available")
+        if not sql:
+            logfire.warn("SQL retrieval requested but no SQL available")
             response_text = "No SQL queries in history. Please ask a question first!"
             return {
                 "response_text": response_text,
@@ -57,44 +58,9 @@ def retrieve_sql(state: ChatbotState) -> dict[str, Any]:
                 ],
             }
 
-        # Check for referenced query ID first (from button click)
-        query_id = state.get("referenced_query_id")
-        target_entry = None
-
-        if query_id and query_id in cache:
-            target_entry = cache[query_id]
-            logfire.info("SQL retrieved by query_id", query_id=query_id)
-        else:
-            # Parse user request to find specific query
-            query_lower = state.get("user_query", "").lower()
-
-            # Look for specific references
-            # Check for numbered references ("first query", "second query")
-            ordinals = {"first": 0, "second": 1, "third": 2, "last": -1, "previous": -1}
-            for word, idx in ordinals.items():
-                if word in query_lower:
-                    sorted_entries = sorted(cache.values(), key=lambda x: x["timestamp"])
-                    if abs(idx) <= len(sorted_entries):
-                        target_entry = sorted_entries[idx]
-                        logfire.info("SQL retrieved by ordinal reference", ordinal=word)
-                        break
-
-            # Check for keyword matches in natural queries
-            if not target_entry:
-                for entry in cache.values():
-                    natural = entry["natural_query"].lower()
-                    if any(word in query_lower for word in natural.split() if len(word) > 3):
-                        target_entry = entry
-                        logfire.info("SQL retrieved by keyword match")
-                        break
-
-            # Default to most recent
-            if not target_entry:
-                target_entry = max(cache.values(), key=lambda x: x["timestamp"])
-                logfire.info("SQL retrieved - most recent query")
-
-        sql = target_entry["sql"]
-        natural_query = target_entry["natural_query"][:50]
+        # Get the original query for context
+        resolved_query = state.get("resolved_query") or state.get("user_query", "")
+        natural_query = resolved_query[:50] if resolved_query else "query"
 
         logfire.info("SQL retrieval complete", sql_length=len(sql))
 

@@ -3,9 +3,9 @@
 Defines the complete workflow graph with nodes and edges for:
 - Intent classification
 - Context resolution for follow-ups
-- SQL generation, validation, and execution
+- SQL generation and execution with retry
 - Response formatting
-- Cached operations (CSV export, SQL retrieval)
+- Button operations (CSV export, SQL retrieval)
 """
 
 import logging
@@ -25,10 +25,9 @@ from app.agents.analytics_chatbot.nodes import (
     polite_decline,
     resolve_context,
     retrieve_sql,
-    validate_sql,
 )
-from app.agents.analytics_chatbot.nodes.sql_executor import execute_and_cache
-from app.agents.analytics_chatbot.routing import route_after_validation, route_by_intent
+from app.agents.analytics_chatbot.nodes.sql_executor import execute_sql
+from app.agents.analytics_chatbot.routing import route_after_execution, route_by_intent
 from app.agents.analytics_chatbot.state import ChatbotState
 
 if TYPE_CHECKING:
@@ -47,11 +46,11 @@ def create_executor_node(db: "AsyncSession", repository: "AnalyticsRepository"):
         repository: Analytics repository for query execution.
 
     Returns:
-        Async function that executes SQL and caches results.
+        Async function that executes SQL.
     """
 
     async def executor_node(state: ChatbotState) -> dict[str, Any]:
-        return await execute_and_cache(state, db, repository)
+        return await execute_sql(state, db, repository)
 
     return executor_node
 
@@ -85,7 +84,6 @@ def create_analytics_chatbot(
 
         # SQL pipeline
         workflow.add_node("sql_generator", generate_sql)
-        workflow.add_node("sql_validator", validate_sql)
 
         # Executor node - needs both db and repository
         if db is not None and repository is not None:
@@ -106,7 +104,7 @@ def create_analytics_chatbot(
         workflow.add_node("interpreter", interpret_results)
         workflow.add_node("format_response", format_slack_response)
 
-        # Cached operations (no LLM)
+        # Button operations (no LLM)
         workflow.add_node("csv_export", export_csv)
         workflow.add_node("sql_retrieval", retrieve_sql)
 
@@ -135,20 +133,20 @@ def create_analytics_chatbot(
         # Context resolver leads to SQL generator
         workflow.add_edge("context_resolver", "sql_generator")
 
-        # SQL pipeline
-        workflow.add_edge("sql_generator", "sql_validator")
+        # SQL pipeline: generator -> executor -> conditional routing
+        workflow.add_edge("sql_generator", "executor")
 
+        # Route after execution: success -> interpreter, error -> retry or error_response
         workflow.add_conditional_edges(
-            "sql_validator",
-            route_after_validation,
+            "executor",
+            route_after_execution,
             {
-                "executor": "executor",
+                "interpreter": "interpreter",
                 "sql_generator": "sql_generator",  # Retry
                 "error_response": "error_response",
             },
         )
 
-        workflow.add_edge("executor", "interpreter")
         workflow.add_edge("interpreter", "format_response")
 
         # ===== Terminal edges =====
@@ -224,7 +222,6 @@ class AnalyticsChatbot:
         channel_id: str = "",
         thread_ts: str | None = None,
         conversation_history: list[dict[str, str]] | None = None,
-        query_cache: dict | None = None,
     ) -> dict[str, Any]:
         """Run the chatbot for a user query.
 
@@ -235,7 +232,6 @@ class AnalyticsChatbot:
             channel_id: Slack channel ID.
             thread_ts: Slack thread timestamp.
             conversation_history: Previous Q&A pairs in session.
-            query_cache: Cached query results from previous runs.
 
         Returns:
             Final state dict with response_text, slack_blocks, etc.
@@ -253,7 +249,6 @@ class AnalyticsChatbot:
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
                 "conversation_history": conversation_history or [],
-                "query_cache": query_cache or {},
                 "messages": [],
                 "retry_count": 0,
             }

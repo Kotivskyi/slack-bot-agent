@@ -1,7 +1,7 @@
 """CSV export node for the analytics chatbot.
 
-Exports cached results as CSV without regenerating queries.
-No LLM calls - retrieves from cache for cost efficiency.
+Exports query results as CSV.
+No LLM calls - uses results from state (pre-populated by SlackService for button clicks).
 """
 
 import csv
@@ -30,56 +30,25 @@ def _update_history(state: ChatbotState, response_text: str) -> list[dict[str, s
 
 
 def export_csv(state: ChatbotState) -> dict[str, Any]:
-    """Export cached results as CSV.
+    """Export query results as CSV.
 
-    NO LLM CALL - retrieves from cache for cost efficiency.
+    NO LLM CALL - uses results from state.
+    For button clicks, SlackService pre-populates query_results from DB.
     Returns the CSV content as part of the response for the service
     layer to handle the actual Slack file upload.
 
     Args:
-        state: Current chatbot state with query_cache.
+        state: Current chatbot state with query_results.
 
     Returns:
         Dict with response_text, slack_blocks, and csv_content fields.
     """
     with logfire.span("export_csv"):
-        cache = state.get("query_cache", {})
-
-        if not cache:
-            logfire.warn("CSV export requested but no cache available")
-            response_text = "No recent query results to export. Please ask a question first!"
-            return {
-                "response_text": response_text,
-                "conversation_history": _update_history(state, response_text),
-                "slack_blocks": [
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": response_text,
-                        },
-                    }
-                ],
-                "csv_content": None,
-                "csv_filename": None,
-            }
-
-        # Get requested query or most recent
-        query_id = state.get("referenced_query_id") or state.get("current_query_id")
-
-        if query_id and query_id in cache:
-            entry = cache[query_id]
-            logfire.info("Exporting specific query", query_id=query_id)
-        else:
-            # Get most recent entry
-            entry = max(cache.values(), key=lambda x: x["timestamp"])
-            logfire.info("Exporting most recent query")
-
-        results = entry["results"]
+        results = state.get("query_results")
 
         if not results:
-            logfire.warn("No data to export")
-            response_text = "The query returned no data to export."
+            logfire.warn("CSV export requested but no results available")
+            response_text = "No recent query results to export. Please ask a question first!"
             return {
                 "response_text": response_text,
                 "conversation_history": _update_history(state, response_text),
@@ -104,7 +73,10 @@ def export_csv(state: ChatbotState) -> dict[str, Any]:
         csv_content = csv_buffer.getvalue()
 
         filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        natural_query = entry["natural_query"][:50]
+
+        # Get the original query for context
+        resolved_query = state.get("resolved_query") or state.get("user_query", "")
+        natural_query = resolved_query[:50] if resolved_query else "query"
 
         logfire.info("CSV generated", row_count=len(results), filename=filename)
 

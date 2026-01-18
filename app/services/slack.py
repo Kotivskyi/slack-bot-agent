@@ -220,28 +220,17 @@ class SlackService:
                     channel_id=channel_id,
                     thread_ts=thread_ts,
                     conversation_history=conversation_history,
-                    query_cache={},  # Rebuilt per request through graph execution
                 )
 
             # 3. Save new turn to DB
             async with get_db_context() as db:
-                # Extract SQL from query_cache (most recent query)
-                sql_query = None
-                query_cache = response.query_cache or {}
-                if query_cache:
-                    # Get the most recent cache entry by timestamp
-                    most_recent = max(
-                        query_cache.values(), key=lambda x: x.get("timestamp", datetime.min)
-                    )
-                    sql_query = most_recent.get("sql")
-
                 await repo.add_turn(
                     db,
                     thread_id=thread_id,
                     user_message=message,
                     bot_response=response.text,
                     intent=response.intent or "unknown",
-                    sql_query=sql_query,
+                    sql_query=response.generated_sql,
                 )
 
             return {
@@ -270,6 +259,8 @@ class SlackService:
     ) -> dict[str, Any]:
         """Handle button action from Slack interactive component.
 
+        Retrieves SQL and results from DB, handles directly without LLM calls.
+
         Args:
             action_id: The action ID (e.g., "export_csv", "show_sql").
             value: The button value (query_id).
@@ -280,73 +271,104 @@ class SlackService:
         Returns:
             Dict with response text and blocks.
         """
+        import csv
+        import io
+
         from app.db.session import get_analytics_db_context, get_db_context
-        from app.repositories import AnalyticsRepository, ConversationRepository, turns_to_history
-        from app.services.agent import AnalyticsAgentService
+        from app.repositories import AnalyticsRepository, ConversationRepository
 
         # Get the thread ID based on the original thread
         thread_id = f"slack_thread_{thread_ts}"
 
-        # Create appropriate user query based on action
-        if action_id == "export_csv":
-            user_query = "export csv"
-        elif action_id == "show_sql":
-            user_query = "show sql"
-        else:
-            return {
-                "text": f"Unknown action: {action_id}",
-                "blocks": None,
-            }
-
         try:
-            # 1. Load history from DB
+            # 1. Get the most recent SQL from conversation history
             async with get_db_context() as db:
                 repo = ConversationRepository()
-                turns = await repo.get_recent_turns(db, thread_id, limit=10)
-                conversation_history = turns_to_history(turns)
+                sql_query = await repo.get_most_recent_sql(db, thread_id)
 
-            # 2. Rebuild query_cache by re-executing SQL for turns that have SQL
-            # This is needed because CSV export requires the actual results data
-            query_cache: dict[str, Any] = {}
-            async with get_analytics_db_context() as analytics_db:
-                analytics_repo = AnalyticsRepository()
-                for i, turn in enumerate(turns):
-                    if turn.sql_query:
-                        try:
-                            rows, _columns = await analytics_repo.execute_query(
-                                analytics_db, turn.sql_query
-                            )
-                            # Use index-based key to allow referencing specific queries
-                            query_id = f"turn_{i}"
-                            query_cache[query_id] = {
-                                "sql": turn.sql_query,
-                                "results": rows,
-                                "timestamp": turn.created_at,
-                                "natural_query": turn.user_message,
-                                "assumptions": [],
-                            }
-                        except Exception as e:
-                            logger.warning(f"Failed to re-execute SQL for turn {i}: {e}")
+            if not sql_query:
+                return {
+                    "text": "No SQL queries in history. Please ask a question first!",
+                    "blocks": None,
+                }
 
-                # 3. Run analytics agent
-                analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
-                response = await analytics_service.run(
-                    user_query=user_query,
-                    thread_id=thread_id,
-                    user_id=user_id,
-                    channel_id=channel_id,
-                    thread_ts=thread_ts,
-                    conversation_history=conversation_history,
-                    query_cache=query_cache,
-                )
+            # 2. Handle action based on type
+            if action_id == "show_sql":
+                # Just return the SQL - no execution needed
+                response_text = "*SQL Query*"
+                return {
+                    "text": response_text,
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": response_text,
+                            },
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"```sql\n{sql_query}\n```",
+                            },
+                        },
+                    ],
+                }
 
-            return {
-                "text": response.text,
-                "blocks": response.slack_blocks,
-                "csv_content": response.csv_content,
-                "csv_filename": response.csv_filename,
-                "csv_title": response.csv_title,
-            }
+            elif action_id == "export_csv":
+                # Re-execute the SQL to get fresh results
+                async with get_analytics_db_context() as analytics_db:
+                    analytics_repo = AnalyticsRepository()
+                    try:
+                        rows, _columns = await analytics_repo.execute_query(
+                            analytics_db, sql_query
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to re-execute SQL for CSV export: {e}")
+                        return {
+                            "text": f"Failed to execute query: {e!s}",
+                            "blocks": None,
+                        }
+
+                if not rows:
+                    return {
+                        "text": "The query returned no data to export.",
+                        "blocks": None,
+                    }
+
+                # Generate CSV content
+                csv_buffer = io.StringIO()
+                writer = csv.DictWriter(csv_buffer, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                writer.writerows(rows)
+                csv_content = csv_buffer.getvalue()
+
+                filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+                response_text = f"*CSV Export Complete*\n_{len(rows)} rows exported_"
+                return {
+                    "text": response_text,
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": response_text,
+                            },
+                        }
+                    ],
+                    "csv_content": csv_content,
+                    "csv_filename": filename,
+                    "csv_title": "Export",
+                }
+
+            else:
+                return {
+                    "text": f"Unknown action: {action_id}",
+                    "blocks": None,
+                }
+
         except Exception:
             logger.exception(f"Error handling button action {action_id}")
             return {

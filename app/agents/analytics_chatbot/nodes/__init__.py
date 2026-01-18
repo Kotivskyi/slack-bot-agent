@@ -10,14 +10,13 @@ from app.agents.analytics_chatbot.nodes.error_handler import handle_error
 from app.agents.analytics_chatbot.nodes.intent_router import classify_intent
 from app.agents.analytics_chatbot.nodes.response_formatter import format_slack_response
 from app.agents.analytics_chatbot.nodes.result_interpreter import interpret_results
-from app.agents.analytics_chatbot.nodes.sql_executor import execute_and_cache
+from app.agents.analytics_chatbot.nodes.sql_executor import execute_sql
 from app.agents.analytics_chatbot.nodes.sql_generator import generate_sql
 from app.agents.analytics_chatbot.nodes.sql_retrieval import retrieve_sql
-from app.agents.analytics_chatbot.nodes.sql_validator import validate_sql
 
 __all__ = [
     "classify_intent",
-    "execute_and_cache",
+    "execute_sql",
     "export_csv",
     "format_slack_response",
     "generate_sql",
@@ -26,5 +25,4 @@ __all__ = [
     "polite_decline",
     "resolve_context",
     "retrieve_sql",
-    "validate_sql",
 ]

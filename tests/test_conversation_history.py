@@ -1,6 +1,5 @@
 """Tests for conversation history persistence in analytics chatbot."""
 
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from app.agents.analytics_chatbot.nodes.csv_export import export_csv
@@ -84,12 +83,12 @@ class TestTerminalNodesUpdateHistory:
         assert result["conversation_history"][1]["user"] == "Show me invalid data"
         assert "couldn't answer" in result["conversation_history"][1]["bot"]
 
-    def test_export_csv_updates_history_no_cache(self):
-        """export_csv should update history even when no cache available."""
+    def test_export_csv_updates_history_no_results(self):
+        """export_csv should update history even when no results available."""
         state = {
             "user_query": "export csv",
             "conversation_history": [],
-            "query_cache": {},
+            "query_results": None,
         }
 
         result = export_csv(state)
@@ -99,22 +98,13 @@ class TestTerminalNodesUpdateHistory:
         assert result["conversation_history"][0]["user"] == "export csv"
         assert "No recent query results" in result["conversation_history"][0]["bot"]
 
-    def test_export_csv_updates_history_with_cache(self):
+    def test_export_csv_updates_history_with_results(self):
         """export_csv should update history when exporting data."""
         state = {
             "user_query": "export csv",
             "conversation_history": [],
-            "query_cache": {
-                "query-1": {
-                    "sql": "SELECT * FROM apps",
-                    "results": [{"id": 1, "name": "App1"}],
-                    "timestamp": datetime.now(),
-                    "natural_query": "list all apps",
-                    "assumptions": [],
-                }
-            },
-            "current_query_id": "query-1",
-            "referenced_query_id": None,
+            "query_results": [{"id": 1, "name": "App1"}],
+            "resolved_query": "list all apps",
         }
 
         result = export_csv(state)
@@ -123,12 +113,12 @@ class TestTerminalNodesUpdateHistory:
         assert len(result["conversation_history"]) == 1
         assert "CSV Export Complete" in result["conversation_history"][0]["bot"]
 
-    def test_retrieve_sql_updates_history_no_cache(self):
-        """retrieve_sql should update history even when no cache available."""
+    def test_retrieve_sql_updates_history_no_sql(self):
+        """retrieve_sql should update history even when no SQL available."""
         state = {
             "user_query": "show sql",
             "conversation_history": [],
-            "query_cache": {},
+            "generated_sql": None,
         }
 
         result = retrieve_sql(state)
@@ -137,21 +127,13 @@ class TestTerminalNodesUpdateHistory:
         assert len(result["conversation_history"]) == 1
         assert "No SQL queries in history" in result["conversation_history"][0]["bot"]
 
-    def test_retrieve_sql_updates_history_with_cache(self):
+    def test_retrieve_sql_updates_history_with_sql(self):
         """retrieve_sql should update history when showing SQL."""
         state = {
             "user_query": "show sql",
             "conversation_history": [],
-            "query_cache": {
-                "query-1": {
-                    "sql": "SELECT COUNT(*) FROM apps",
-                    "results": [{"count": 10}],
-                    "timestamp": datetime.now(),
-                    "natural_query": "count apps",
-                    "assumptions": [],
-                }
-            },
-            "referenced_query_id": "query-1",
+            "generated_sql": "SELECT COUNT(*) FROM apps",
+            "resolved_query": "count apps",
         }
 
         result = retrieve_sql(state)
