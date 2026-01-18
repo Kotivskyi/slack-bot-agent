@@ -11,7 +11,7 @@ from app.agents.analytics_chatbot.state import ChatbotState
 
 def route_by_intent(
     state: ChatbotState,
-) -> Literal["sql_generator", "context_resolver", "csv_export", "sql_retrieval", "decline"]:
+) -> Literal["context_resolver", "csv_export", "sql_retrieval", "decline"]:
     """Main intent router - determines which pipeline to use.
 
     Args:
@@ -23,7 +23,7 @@ def route_by_intent(
     intent = state.get("intent", "off_topic")
 
     routing = {
-        "analytics_query": "sql_generator",
+        "analytics_query": "context_resolver",  # Unified path through context resolver
         "follow_up": "context_resolver",
         "export_csv": "csv_export",
         "show_sql": "sql_retrieval",

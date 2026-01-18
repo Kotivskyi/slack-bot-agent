@@ -1,6 +1,8 @@
 """Context resolver node for the analytics chatbot.
 
-Expands follow-up questions using conversation history to create standalone queries.
+Resolves query context using conversation history to create standalone queries.
+For all analytics queries (both new and follow-ups), this node produces
+a complete, self-contained query for SQL generation.
 """
 
 import logging
@@ -17,10 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_context(state: ChatbotState) -> dict[str, Any]:
-    """Expand follow-up questions using conversation context.
+    """Resolve query context using conversation history.
 
-    Identifies which previous query is being referenced and
-    rewrites the question as a complete, standalone query.
+    For all analytics queries (both new and follow-ups), this node:
+    1. Analyzes the current query in context of conversation history
+    2. Produces a standalone, complete query for SQL generation
+    3. For new topics or no history, returns the original query unchanged
 
     Args:
         state: Current chatbot state with user_query and conversation_history.
@@ -28,22 +32,29 @@ def resolve_context(state: ChatbotState) -> dict[str, Any]:
     Returns:
         Dict with resolved_query and referenced_query_id fields.
     """
-    with logfire.span("resolve_context", current_query=state.get("user_query", "")[:100]):
-        # Format history with query IDs for reference
+    with logfire.span(
+        "resolve_context",
+        current_query=state.get("user_query", "")[:100],
+        intent=state.get("intent"),
+    ):
         history = state.get("conversation_history", [])
+        user_query = state.get("user_query", "")
+
+        # Fast path: No history means no context resolution needed
+        if not history:
+            logfire.info("No history - returning original query")
+            return {
+                "resolved_query": user_query,
+                "referenced_query_id": None,
+            }
+
+        # Format history for LLM
         history_text = "\n".join(
             [
                 f"[Query {i + 1}] User: {turn['user']}\nBot: {turn['bot'][:300]}"
                 for i, turn in enumerate(history[-5:])
             ]
         )
-
-        if not history_text:
-            logfire.info("No history to resolve against")
-            return {
-                "resolved_query": state.get("user_query"),
-                "referenced_query_id": None,
-            }
 
         with logfire.span("llm_context_resolution"):
             llm = ChatOpenAI(
@@ -54,18 +65,22 @@ def resolve_context(state: ChatbotState) -> dict[str, Any]:
             chain = CONTEXT_RESOLVER_PROMPT | llm
             response = chain.invoke(
                 {
-                    "current_query": state.get("user_query", ""),
+                    "current_query": user_query,
                     "history": history_text,
                 }
             )
 
         resolved = response.content.strip()
-        referenced_id = state.get("current_query_id")
+
+        # Track whether context was actually used
+        context_used = resolved.lower() != user_query.lower()
+        referenced_id = state.get("current_query_id") if context_used else None
 
         logfire.info(
             "Context resolved",
-            original=state.get("user_query", "")[:100],
+            original=user_query[:100],
             resolved=resolved[:100],
+            context_used=context_used,
         )
 
         return {

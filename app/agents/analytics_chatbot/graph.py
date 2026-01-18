@@ -12,7 +12,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import logfire
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -121,11 +120,11 @@ def create_analytics_chatbot(
         # ===== Define edges =====
 
         # Intent routing (conditional)
+        # Both analytics_query and follow_up route to context_resolver first
         workflow.add_conditional_edges(
             "intent_router",
             route_by_intent,
             {
-                "sql_generator": "sql_generator",
                 "context_resolver": "context_resolver",
                 "csv_export": "csv_export",
                 "sql_retrieval": "sql_retrieval",
@@ -166,25 +165,21 @@ def create_analytics_chatbot(
 def compile_analytics_chatbot(
     db: "AsyncSession | None" = None,
     repository: "AnalyticsRepository | None" = None,
-    checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Compile the analytics chatbot graph.
 
     Args:
         db: Optional database session for SQL execution.
         repository: Optional analytics repository for SQL execution.
-        checkpointer: Optional checkpointer for state persistence.
 
     Returns:
         Compiled StateGraph ready for invocation.
     """
     with logfire.span("compile_analytics_chatbot"):
         workflow = create_analytics_chatbot(db, repository)
+        app = workflow.compile()
 
-        # Compile with optional checkpointer
-        app = workflow.compile(checkpointer=checkpointer) if checkpointer else workflow.compile()
-
-        logfire.info("Analytics chatbot compiled", has_checkpointer=checkpointer is not None)
+        logfire.info("Analytics chatbot compiled")
         return app
 
 
@@ -199,18 +194,15 @@ class AnalyticsChatbot:
         self,
         db: "AsyncSession",
         repository: "AnalyticsRepository",
-        checkpointer: BaseCheckpointSaver | None = None,
     ):
         """Initialize the chatbot.
 
         Args:
             db: Database session for SQL execution.
             repository: Analytics repository for SQL execution.
-            checkpointer: Optional checkpointer for state persistence.
         """
         self._db = db
         self._repository = repository
-        self._checkpointer = checkpointer
         self._graph: CompiledStateGraph | None = None
 
     @property
@@ -220,7 +212,6 @@ class AnalyticsChatbot:
             self._graph = compile_analytics_chatbot(
                 db=self._db,
                 repository=self._repository,
-                checkpointer=self._checkpointer,
             )
         return self._graph
 

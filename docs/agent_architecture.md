@@ -14,24 +14,27 @@ User Message → Intent Router → [Route by Intent]
     ┌───────────────────────────────┼───────────────────────────────┐
     │                               │                               │
     ▼                               ▼                               ▼
-analytics_query              follow_up                    export_csv/show_sql/off_topic
+analytics_query / follow_up   export_csv/show_sql              off_topic
     │                               │                               │
     ▼                               ▼                               ▼
-SQL Generator ◄──────── Context Resolver              Cached Operations / Decline
-    │                                                               │
-    ▼                                                               │
-SQL Validator ──(invalid, retry < 2)──► SQL Generator               │
-    │                                                               │
-    │──(invalid, retry >= 2)──► Error Handler ──────────────────────┤
-    │                                                               │
-    ▼ (valid)                                                       │
-SQL Executor + Cache                                                │
-    │                                                               │
-    ▼                                                               │
-Result Interpreter                                                  │
-    │                                                               │
-    ▼                                                               │
-Response Formatter ◄────────────────────────────────────────────────┘
+Context Resolver            Cached Operations                   Decline
+    │                               │                               │
+    ▼                               │                               │
+SQL Generator                       │                               │
+    │                               │                               │
+    ▼                               │                               │
+SQL Validator ──(retry)──► SQL Generator                            │
+    │                               │                               │
+    │──(max retries)──► Error Handler ─────────────────────────────┤
+    │                               │                               │
+    ▼ (valid)                       │                               │
+SQL Executor + Cache                │                               │
+    │                               │                               │
+    ▼                               │                               │
+Result Interpreter                  │                               │
+    │                               │                               │
+    ▼                               │                               │
+Response Formatter ◄────────────────┴───────────────────────────────┘
     │
     ▼
 Save to Conversation History → Send to Slack
@@ -244,8 +247,8 @@ When users click Export CSV or Show SQL buttons:
 
 ### route_by_intent()
 Maps intents to their target nodes:
-- `analytics_query` → `sql_generator`
-- `follow_up` → `context_resolver`
+- `analytics_query` → `context_resolver` (unified path)
+- `follow_up` → `context_resolver` (unified path)
 - `export_csv` → `csv_export`
 - `show_sql` → `sql_retrieval`
 - `off_topic` → `decline`
@@ -365,12 +368,12 @@ All nodes are instrumented with Logfire spans:
 
 | Query Type | LLM Calls |
 |------------|-----------|
-| New analytics question | 3 (intent + SQL + interpret) |
+| New analytics question | 4 (intent + context + SQL + interpret) |
 | Follow-up question | 4 (intent + context + SQL + interpret) |
 | CSV export | 0 |
 | Show SQL | 0 |
 | Off-topic | 1 (intent only) |
-| Failed SQL (after retries) | 2-3 (intent + SQL attempts) |
+| Failed SQL (after retries) | 3-4 (intent + context + SQL attempts) |
 
 ## LLM Prompts
 

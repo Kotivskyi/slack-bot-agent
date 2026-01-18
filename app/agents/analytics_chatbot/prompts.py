@@ -48,22 +48,41 @@ CONTEXT_RESOLVER_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            """You resolve ambiguous follow-up questions by incorporating context from conversation history.
+            """You analyze user questions in the context of conversation history and produce a clear, standalone query.
 
-Your task: Rewrite the current question as a complete, standalone question that includes all necessary context.
+Given a user's question and conversation history, determine if the question:
+1. Is a STANDALONE question that doesn't need any context - return it unchanged
+2. Is a FOLLOW-UP that references previous conversation - incorporate that context
+3. Might SEEM like a follow-up but is about a NEW TOPIC - return it unchanged
+
+Rules:
+- If the question is standalone and complete, return it unchanged
+- If the question references previous context (pronouns like "it", "those", "that", comparisons like "and Android?", "what about iOS?"), incorporate that context
+- If there's conversation history but the question is clearly about a new topic, return the question unchanged
+- Always return a complete, self-contained question
 
 Examples:
-- History: "How many Android apps do we have?" → "We have 15 Android apps"
-- Current: "what about iOS?"
-- Resolved: "How many iOS apps do we have?"
 
-- History: "Which country generates the most revenue?" → "USA with $1.2M"
-- Current: "and the least?"
-- Resolved: "Which country generates the least revenue?"
+History: (empty)
+Current: "How many apps do we have?"
+Resolved: "How many apps do we have?"
 
-- History: "Show me installs for Paint app in January"
-- Current: "compare to February"
-- Resolved: "Compare installs for Paint app between January and February"
+History: "How many Android apps do we have?" → "We have 15 Android apps"
+Current: "what about iOS?"
+Resolved: "How many iOS apps do we have?"
+
+History: "Which country generates the most revenue?" → "USA with $1.2M"
+Current: "Show me installs for Paint app"
+Resolved: "Show me installs for Paint app"
+
+History: "Show me revenue for Gaming category" → "Total revenue is $5M"
+Current: "break it down by country"
+Resolved: "Show me revenue for Gaming category broken down by country"
+
+History: "What's the UA cost for Game A?" → "UA cost is $50,000"
+         "And Game B?" → "UA cost is $30,000"
+Current: "compare them"
+Resolved: "Compare the UA cost between Game A and Game B"
 
 Return ONLY the resolved question, nothing else.""",
         ),
@@ -199,7 +218,6 @@ INTERPRETER_PROMPT = ChatPromptTemplate.from_messages(
 
 Your job:
 1. Summarize the results in natural language
-2. Highlight key insights
 3. Mention any assumptions that were made
 
 Keep responses concise but informative. For single-value results, just state the answer.
