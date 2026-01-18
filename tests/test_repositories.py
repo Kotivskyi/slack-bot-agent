@@ -316,6 +316,38 @@ class TestConversationRepository:
         assert added_turn.sql_query == sql
 
     @pytest.mark.anyio
+    async def test_add_turn_stores_action_id(self, repository, mock_session):
+        """Test add_turn stores action_id when provided."""
+        action_id = "550e8400-e29b-41d4-a716-446655440000"
+
+        await repository.add_turn(
+            mock_session,
+            thread_id="thread-1",
+            user_message="list apps",
+            bot_response="Here are your apps",
+            intent="analytics_query",
+            sql_query="SELECT * FROM apps",
+            action_id=action_id,
+        )
+
+        added_turn = mock_session.add.call_args[0][0]
+        assert added_turn.action_id == action_id
+
+    @pytest.mark.anyio
+    async def test_add_turn_without_action_id(self, repository, mock_session):
+        """Test add_turn stores None for action_id when not provided."""
+        await repository.add_turn(
+            mock_session,
+            thread_id="thread-1",
+            user_message="list apps",
+            bot_response="Here are your apps",
+            intent="analytics_query",
+        )
+
+        added_turn = mock_session.add.call_args[0][0]
+        assert added_turn.action_id is None
+
+    @pytest.mark.anyio
     async def test_get_recent_turns_returns_chronological_order(self, repository, mock_session):
         """Test get_recent_turns returns turns oldest first."""
         from app.db.models.conversation import ConversationTurn
@@ -392,6 +424,46 @@ class TestConversationRepository:
         sql = await repository.find_sql_by_keyword(mock_session, "thread-1", "nonexistent")
 
         assert sql is None
+
+    @pytest.mark.anyio
+    async def test_get_turn_by_action_id_returns_turn(self, repository, mock_session):
+        """Test get_turn_by_action_id returns the conversation turn."""
+        from app.db.models.conversation import ConversationTurn
+
+        action_id = "550e8400-e29b-41d4-a716-446655440000"
+        mock_turn = ConversationTurn(
+            id=1,
+            thread_id="thread-1",
+            user_message="list apps",
+            bot_response="Here are your apps",
+            intent="analytics_query",
+            sql_query="SELECT * FROM apps",
+            action_id=action_id,
+            created_at=datetime(2024, 1, 1, 10, 0),
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_turn
+        mock_session.execute.return_value = mock_result
+
+        turn = await repository.get_turn_by_action_id(mock_session, action_id)
+
+        assert turn is not None
+        assert turn.action_id == action_id
+        assert turn.sql_query == "SELECT * FROM apps"
+
+    @pytest.mark.anyio
+    async def test_get_turn_by_action_id_returns_none_when_not_found(
+        self, repository, mock_session
+    ):
+        """Test get_turn_by_action_id returns None when no turn found."""
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = mock_result
+
+        turn = await repository.get_turn_by_action_id(mock_session, "nonexistent-action-id")
+
+        assert turn is None
 
     @pytest.mark.anyio
     async def test_cleanup_old_turns_deletes_and_returns_count(self, repository, mock_session):

@@ -24,6 +24,7 @@ class ConversationTurn(Base):
     bot_response: Mapped[str] = mapped_column(Text, nullable=False)
     intent: Mapped[str] = mapped_column(String(50), nullable=False)
     sql_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -14,6 +14,109 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Slack API limits
+SLACK_MAX_TEXT_LENGTH = 40000  # Max chars for text field
+SLACK_MAX_BLOCK_TEXT_LENGTH = 3000  # Max chars for section/context block text
+SLACK_MAX_BLOCKS = 50  # Max blocks per message
+
+# Truncation message
+TRUNCATION_NOTICE = "\n\n_...table truncated. Click *Export CSV* for complete data._"
+
+
+def _truncate_block_text(text: str, max_length: int = SLACK_MAX_BLOCK_TEXT_LENGTH) -> str:
+    """Truncate block text to fit Slack limits.
+
+    Intelligently truncates text, preferring to cut at line boundaries
+    for code blocks (tables). Adds truncation notice.
+
+    Args:
+        text: The text to truncate.
+        max_length: Maximum allowed length.
+
+    Returns:
+        Truncated text with notice if truncation occurred.
+    """
+    if len(text) <= max_length:
+        return text
+
+    # Reserve space for truncation notice
+    available_length = max_length - len(TRUNCATION_NOTICE)
+
+    # Check if this is a code block (table)
+    if text.startswith("```"):
+        # Find line boundaries to truncate cleanly
+        lines = text.split("\n")
+        truncated_lines = []
+        current_length = 0
+
+        for line in lines:
+            # +1 for newline
+            if current_length + len(line) + 1 > available_length - 10:  # Buffer for closing ```
+                break
+            truncated_lines.append(line)
+            current_length += len(line) + 1
+
+        # Ensure we close the code block
+        truncated_text = "\n".join(truncated_lines)
+        if not truncated_text.endswith("```"):
+            truncated_text += "\n```"
+
+        return truncated_text + TRUNCATION_NOTICE
+
+    # For regular text, truncate at word boundary
+    truncated = text[:available_length]
+    last_space = truncated.rfind(" ")
+    if last_space > available_length * 0.8:  # Only use word boundary if reasonable
+        truncated = truncated[:last_space]
+
+    return truncated + TRUNCATION_NOTICE
+
+
+def _prepare_blocks_for_slack(blocks: list[dict] | None) -> list[dict] | None:
+    """Prepare blocks for Slack by truncating oversized content.
+
+    Args:
+        blocks: List of Slack Block Kit blocks.
+
+    Returns:
+        Validated and truncated blocks, or None if input was None.
+    """
+    if not blocks:
+        return blocks
+
+    # Limit number of blocks
+    if len(blocks) > SLACK_MAX_BLOCKS:
+        logger.warning(f"Truncating blocks from {len(blocks)} to {SLACK_MAX_BLOCKS}")
+        blocks = blocks[:SLACK_MAX_BLOCKS]
+
+    # Process each block
+    for block in blocks:
+        block_type = block.get("type")
+
+        # Handle section blocks
+        if block_type == "section" and "text" in block:
+            text_obj = block["text"]
+            if isinstance(text_obj, dict) and "text" in text_obj:
+                original_text = text_obj["text"]
+                if len(original_text) > SLACK_MAX_BLOCK_TEXT_LENGTH:
+                    logger.warning(
+                        f"Truncating section block from {len(original_text)} to {SLACK_MAX_BLOCK_TEXT_LENGTH} chars"
+                    )
+                    text_obj["text"] = _truncate_block_text(original_text)
+
+        # Handle context blocks
+        elif block_type == "context" and "elements" in block:
+            for element in block["elements"]:
+                if isinstance(element, dict) and "text" in element:
+                    original_text = element["text"]
+                    if len(original_text) > SLACK_MAX_BLOCK_TEXT_LENGTH:
+                        logger.warning(
+                            f"Truncating context block from {len(original_text)} to {SLACK_MAX_BLOCK_TEXT_LENGTH} chars"
+                        )
+                        element["text"] = _truncate_block_text(original_text)
+
+    return blocks
+
 
 class SlackService:
     """Service for Slack-related operations."""
@@ -75,6 +178,8 @@ class SlackService:
     ) -> dict:
         """Send a message to a Slack channel.
 
+        Automatically truncates oversized content to fit Slack API limits.
+
         Args:
             channel: Channel ID to send message to.
             text: Message text (fallback for notifications).
@@ -88,14 +193,24 @@ class SlackService:
             SlackApiError: If the API call fails.
         """
         try:
+            # Truncate text if too long
+            if len(text) > SLACK_MAX_TEXT_LENGTH:
+                logger.warning(
+                    f"Truncating message text from {len(text)} to {SLACK_MAX_TEXT_LENGTH} chars"
+                )
+                text = text[: SLACK_MAX_TEXT_LENGTH - 3] + "..."
+
+            # Validate and truncate blocks
+            validated_blocks = _prepare_blocks_for_slack(blocks)
+
             kwargs: dict[str, Any] = {
                 "channel": channel,
                 "text": text,
             }
             if thread_ts:
                 kwargs["thread_ts"] = thread_ts
-            if blocks:
-                kwargs["blocks"] = blocks
+            if validated_blocks:
+                kwargs["blocks"] = validated_blocks
 
             response = await self.client.chat_postMessage(**kwargs)
             return response.data
@@ -231,6 +346,7 @@ class SlackService:
                     bot_response=response.text,
                     intent=response.intent or "unknown",
                     sql_query=response.generated_sql,
+                    action_id=response.action_id,
                 )
 
             return {
@@ -263,7 +379,7 @@ class SlackService:
 
         Args:
             action_id: The action ID (e.g., "export_csv", "show_sql").
-            value: The button value (query_id).
+            value: The button value (action_id UUID for the specific turn).
             user_id: The Slack user ID.
             channel_id: The Slack channel ID.
             thread_ts: Thread timestamp for the message.
@@ -277,18 +393,22 @@ class SlackService:
         from app.db.session import get_analytics_db_context, get_db_context
         from app.repositories import AnalyticsRepository, ConversationRepository
 
-        # Get the thread ID based on the original thread
-        thread_id = f"slack_thread_{thread_ts}"
-
         try:
-            # 1. Get the most recent SQL from conversation history
+            # 1. Look up the specific conversation turn by action_id (the button value)
             async with get_db_context() as db:
                 repo = ConversationRepository()
-                sql_query = await repo.get_most_recent_sql(db, thread_id)
+                turn = await repo.get_turn_by_action_id(db, value)
 
+            if not turn:
+                return {
+                    "text": "Could not find the referenced query. It may have expired.",
+                    "blocks": None,
+                }
+
+            sql_query = turn.sql_query
             if not sql_query:
                 return {
-                    "text": "No SQL queries in history. Please ask a question first!",
+                    "text": "No SQL query associated with this response.",
                     "blocks": None,
                 }
 
@@ -321,9 +441,7 @@ class SlackService:
                 async with get_analytics_db_context() as analytics_db:
                     analytics_repo = AnalyticsRepository()
                     try:
-                        rows, _columns = await analytics_repo.execute_query(
-                            analytics_db, sql_query
-                        )
+                        rows, _columns = await analytics_repo.execute_query(analytics_db, sql_query)
                     except Exception as e:
                         logger.warning(f"Failed to re-execute SQL for CSV export: {e}")
                         return {
@@ -375,6 +493,122 @@ class SlackService:
                 "text": "Sorry, I encountered an error. Please try again.",
                 "blocks": None,
             }
+
+    async def process_message(
+        self,
+        channel: str,
+        text: str,
+        user_id: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Process a Slack message and send response.
+
+        Orchestrates the full flow: analytics response → file upload (if CSV) → send message.
+        Designed to be run as a background task.
+
+        Args:
+            channel: Channel ID to respond to.
+            text: Message text from user.
+            user_id: User ID who sent the message.
+            thread_ts: Thread timestamp for replies.
+        """
+        logger.info(f"Processing analytics message from user {user_id}: {text[:50]}...")
+
+        try:
+            response = await self.generate_analytics_response(
+                message=text,
+                user_id=user_id,
+                channel_id=channel,
+                thread_ts=thread_ts,
+            )
+
+            # Handle CSV export if present
+            if response.get("csv_content") and response.get("csv_filename"):
+                await self.upload_file(
+                    channel=channel,
+                    content=response["csv_content"],
+                    filename=response["csv_filename"],
+                    title=response.get("csv_title"),
+                    thread_ts=thread_ts,
+                )
+
+            # Send response back to Slack
+            await self.send_message(
+                channel=channel,
+                text=response.get("text", ""),
+                thread_ts=thread_ts,
+                blocks=response.get("blocks"),
+            )
+        except Exception:
+            logger.exception(f"Error processing message from user {user_id}")
+            await self._send_error_message(channel, thread_ts)
+
+    async def process_button_click(
+        self,
+        action_id: str,
+        value: str,
+        user_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> None:
+        """Process a button click and send response.
+
+        Orchestrates: button action handling → file upload (if CSV) → send message.
+        Designed to be run as a background task.
+
+        Args:
+            action_id: The action ID (e.g., "export_csv", "show_sql").
+            value: The button value (action_id UUID for the specific turn).
+            user_id: The Slack user ID.
+            channel_id: The Slack channel ID.
+            thread_ts: Thread timestamp for the message.
+        """
+        logger.info(f"Processing button action {action_id} from user {user_id}")
+
+        try:
+            response = await self.handle_button_action(
+                action_id=action_id,
+                value=value,
+                user_id=user_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+            )
+
+            # Handle CSV export if present
+            if response.get("csv_content") and response.get("csv_filename"):
+                await self.upload_file(
+                    channel=channel_id,
+                    content=response["csv_content"],
+                    filename=response["csv_filename"],
+                    title=response.get("csv_title"),
+                    thread_ts=thread_ts,
+                )
+
+            # Send response back to Slack
+            await self.send_message(
+                channel=channel_id,
+                text=response.get("text", ""),
+                thread_ts=thread_ts,
+                blocks=response.get("blocks"),
+            )
+        except Exception:
+            logger.exception(f"Error processing button action {action_id}")
+
+    async def _send_error_message(self, channel: str, thread_ts: str | None) -> None:
+        """Send error message to user.
+
+        Args:
+            channel: Channel ID to send error to.
+            thread_ts: Thread timestamp for replies.
+        """
+        try:
+            await self.send_message(
+                channel=channel,
+                text="Sorry, I encountered an error. Please try again.",
+                thread_ts=thread_ts,
+            )
+        except Exception:
+            logger.exception("Failed to send error message")
 
 
 # Service instance

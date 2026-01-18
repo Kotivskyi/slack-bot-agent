@@ -45,6 +45,7 @@ class AnalyticsResponse:
         intent: Classified intent of the user query.
         conversation_history: Updated conversation history.
         generated_sql: The SQL query if one was generated.
+        action_id: UUID for button action lookups.
         csv_content: CSV content if export was requested.
         csv_filename: Filename for CSV export.
         csv_title: Title for CSV file.
@@ -55,6 +56,7 @@ class AnalyticsResponse:
     intent: str | None = None
     conversation_history: list[dict] | None = None
     generated_sql: str | None = None
+    action_id: str | None = None
     csv_content: str | None = None
     csv_filename: str | None = None
     csv_title: str | None = None
@@ -410,6 +412,7 @@ class AnalyticsAgentService:
             intent=result.get("intent"),
             conversation_history=result.get("conversation_history", []),
             generated_sql=result.get("generated_sql"),
+            action_id=result.get("action_id"),
             csv_content=result.get("csv_content"),
             csv_filename=result.get("csv_filename"),
             csv_title=result.get("csv_title"),

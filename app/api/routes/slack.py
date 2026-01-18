@@ -14,104 +14,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def process_slack_message(channel: str, text: str, user: str, thread_ts: str | None) -> None:
-    """Process a Slack message in the background using analytics chatbot.
-
-    Args:
-        channel: Channel ID to respond to.
-        text: Message text from user.
-        user: User ID who sent the message.
-        thread_ts: Thread timestamp for replies.
-    """
-    logger.info(f"Processing analytics message from user {user}: {text[:50]}...")
-
-    try:
-        # Generate analytics response
-        response = await slack_service.generate_analytics_response(
-            message=text,
-            user_id=user,
-            channel_id=channel,
-            thread_ts=thread_ts,
-        )
-
-        # Handle CSV export if present
-        if response.get("csv_content") and response.get("csv_filename"):
-            await slack_service.upload_file(
-                channel=channel,
-                content=response["csv_content"],
-                filename=response["csv_filename"],
-                title=response.get("csv_title"),
-                thread_ts=thread_ts,
-            )
-
-        # Send response back to Slack
-        await slack_service.send_message(
-            channel=channel,
-            text=response.get("text", ""),
-            thread_ts=thread_ts,
-            blocks=response.get("blocks"),
-        )
-    except Exception:
-        logger.exception(f"Error processing message from user {user}")
-        # Send error message
-        try:
-            await slack_service.send_message(
-                channel=channel,
-                text="Sorry, I encountered an error. Please try again.",
-                thread_ts=thread_ts,
-            )
-        except Exception:
-            logger.exception("Failed to send error message")
-
-
-async def process_button_action(
-    action_id: str,
-    value: str,
-    user_id: str,
-    channel_id: str,
-    thread_ts: str,
-) -> None:
-    """Process a button action in the background.
-
-    Args:
-        action_id: The action ID (e.g., "export_csv", "show_sql").
-        value: The button value (query_id).
-        user_id: The Slack user ID.
-        channel_id: The Slack channel ID.
-        thread_ts: Thread timestamp for the message.
-    """
-    logger.info(f"Processing button action {action_id} from user {user_id}")
-
-    try:
-        response = await slack_service.handle_button_action(
-            action_id=action_id,
-            value=value,
-            user_id=user_id,
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-        )
-
-        # Handle CSV export if present
-        if response.get("csv_content") and response.get("csv_filename"):
-            await slack_service.upload_file(
-                channel=channel_id,
-                content=response["csv_content"],
-                filename=response["csv_filename"],
-                title=response.get("csv_title"),
-                thread_ts=thread_ts,
-            )
-
-        # Send response back to Slack
-        await slack_service.send_message(
-            channel=channel_id,
-            text=response.get("text", ""),
-            thread_ts=thread_ts,
-            blocks=response.get("blocks"),
-        )
-    except Exception:
-        logger.exception(f"Error processing button action {action_id}")
-
-
 @router.post("/events", response_model=None)
 async def slack_events(
     request: Request,
@@ -128,15 +30,12 @@ async def slack_events(
     - URL verification challenges from Slack
     - Message events (app_mention, message)
     """
-    # Get raw body for signature verification
     body = await request.body()
 
-    # Verify request signature
     if not slack_service.verify_request(body, x_slack_request_timestamp, x_slack_signature):
         logger.warning("Invalid Slack request signature")
         raise HTTPException(status_code=401, detail="Invalid request signature")
 
-    # Parse event
     event_wrapper = SlackEventWrapper.model_validate_json(body)
 
     # Handle URL verification challenge (must respond synchronously)
@@ -166,10 +65,10 @@ async def slack_events(
             thread_ts = event.thread_ts or event.ts
             # Process message in background to respond quickly to Slack
             background_tasks.add_task(
-                process_slack_message,
+                slack_service.process_message,
                 channel=event.channel,
                 text=event.text,
-                user=event.user,
+                user_id=event.user,
                 thread_ts=thread_ts,
             )
 
@@ -192,10 +91,8 @@ async def slack_interactions(
     This endpoint handles:
     - Button clicks (export_csv, show_sql)
     """
-    # Get raw body for signature verification
     body = await request.body()
 
-    # Verify request signature
     if not slack_service.verify_request(body, x_slack_request_timestamp, x_slack_signature):
         logger.warning("Invalid Slack request signature for interaction")
         raise HTTPException(status_code=401, detail="Invalid request signature")
@@ -223,7 +120,7 @@ async def slack_interactions(
             if action_id in ("export_csv", "show_sql"):
                 # Process in background
                 background_tasks.add_task(
-                    process_button_action,
+                    slack_service.process_button_click,
                     action_id=action_id,
                     value=value,
                     user_id=user.get("id", ""),

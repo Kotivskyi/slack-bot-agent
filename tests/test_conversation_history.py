@@ -143,6 +143,98 @@ class TestTerminalNodesUpdateHistory:
         assert "SQL Query" in result["conversation_history"][0]["bot"]
 
 
+class TestActionIdGeneration:
+    """Test that action_id is properly generated for button actions."""
+
+    def test_format_slack_response_generates_action_id_with_results(self):
+        """format_slack_response should generate action_id UUID when query_results exist."""
+        state = {
+            "user_query": "How many apps?",
+            "conversation_history": [],
+            "response_text": "You have 10 apps.",
+            "response_format": "table",
+            "query_results": [{"count": 10}],
+            "column_names": ["count"],
+            "assumptions_made": [],
+            "current_query_id": "some-hash",
+        }
+
+        result = format_slack_response(state)
+
+        assert "action_id" in result
+        assert result["action_id"] is not None
+        # Verify it's a valid UUID format (36 chars with hyphens)
+        assert len(result["action_id"]) == 36
+        assert result["action_id"].count("-") == 4
+
+    def test_format_slack_response_no_action_id_without_results(self):
+        """format_slack_response should not generate action_id when no query_results."""
+        state = {
+            "user_query": "Hello",
+            "conversation_history": [],
+            "response_text": "Hi there!",
+            "response_format": "simple",
+            "query_results": None,
+            "assumptions_made": [],
+            "current_query_id": None,
+        }
+
+        result = format_slack_response(state)
+
+        assert "action_id" in result
+        assert result["action_id"] is None
+
+    def test_format_slack_response_buttons_use_action_id(self):
+        """format_slack_response should use action_id as button value."""
+        state = {
+            "user_query": "How many apps?",
+            "conversation_history": [],
+            "response_text": "You have 10 apps.",
+            "response_format": "table",
+            "query_results": [{"count": 10}],
+            "column_names": ["count"],
+            "assumptions_made": [],
+            "current_query_id": "some-hash",
+        }
+
+        result = format_slack_response(state)
+
+        # Find the actions block
+        actions_block = None
+        for block in result["slack_blocks"]:
+            if block.get("type") == "actions":
+                actions_block = block
+                break
+
+        assert actions_block is not None
+        # Verify both buttons use the same action_id
+        export_button = actions_block["elements"][0]
+        show_sql_button = actions_block["elements"][1]
+
+        assert export_button["value"] == result["action_id"]
+        assert show_sql_button["value"] == result["action_id"]
+        assert export_button["action_id"] == "export_csv"
+        assert show_sql_button["action_id"] == "show_sql"
+
+    def test_format_slack_response_unique_action_ids(self):
+        """Each call to format_slack_response should generate a unique action_id."""
+        state = {
+            "user_query": "How many apps?",
+            "conversation_history": [],
+            "response_text": "You have 10 apps.",
+            "response_format": "table",
+            "query_results": [{"count": 10}],
+            "column_names": ["count"],
+            "assumptions_made": [],
+            "current_query_id": "some-hash",
+        }
+
+        result1 = format_slack_response(state)
+        result2 = format_slack_response(state)
+
+        assert result1["action_id"] != result2["action_id"]
+
+
 class TestHistoryTruncation:
     """Test that bot responses are truncated in history."""
 

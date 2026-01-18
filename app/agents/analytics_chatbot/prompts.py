@@ -222,18 +222,17 @@ INTERPRETER_PROMPT = ChatPromptTemplate.from_messages(
 
 Your job:
 1. Summarize the results in natural language
-3. Mention any assumptions that were made
+2. Highlight key insights or trends if applicable
 
 Keep responses concise but informative. For single-value results, just state the answer.
 For tables, provide a brief summary of what the data shows.
 
-Do NOT include the raw data in your response - that will be formatted separately.""",
+Do NOT include the raw data in your response - that will be formatted separately.
+Do NOT mention assumptions - they will be shown separately in the message footer.""",
         ),
         (
             "human",
             """Original question: {query}
-
-SQL assumptions made: {assumptions}
 
 Query returned {row_count} rows.
 Column names: {columns}

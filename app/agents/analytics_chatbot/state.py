@@ -56,3 +56,4 @@ class ChatbotState(TypedDict):
     response_text: str  # Final formatted response
     assumptions_made: list[str]  # Assumptions noted for user
     slack_blocks: list[dict[str, Any]] | None  # Slack Block Kit formatted response
+    action_id: str | None  # UUID for button action lookups

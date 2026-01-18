@@ -29,6 +29,7 @@ class ConversationRepository:
         bot_response: str,
         intent: str,
         sql_query: str | None = None,
+        action_id: str | None = None,
     ) -> ConversationTurn:
         """Add a new conversation turn.
 
@@ -39,6 +40,7 @@ class ConversationRepository:
             bot_response: The bot's response (truncated to MAX_BOT_RESPONSE_LENGTH).
             intent: The classified intent of the query.
             sql_query: Optional SQL query if one was generated.
+            action_id: Optional UUID for button action lookups.
 
         Returns:
             The created ConversationTurn model.
@@ -54,6 +56,7 @@ class ConversationRepository:
             bot_response=truncated_response,
             intent=intent,
             sql_query=sql_query,
+            action_id=action_id,
         )
         db.add(turn)
         await db.flush()
@@ -111,6 +114,25 @@ class ConversationRepository:
         )
         row = result.scalar_one_or_none()
         return row
+
+    async def get_turn_by_action_id(
+        self,
+        db: AsyncSession,
+        action_id: str,
+    ) -> ConversationTurn | None:
+        """Get a conversation turn by its action_id.
+
+        Args:
+            db: Async database session.
+            action_id: The unique action ID (UUID) for the turn.
+
+        Returns:
+            The ConversationTurn model if found, or None.
+        """
+        result = await db.execute(
+            select(ConversationTurn).where(ConversationTurn.action_id == action_id)
+        )
+        return result.scalar_one_or_none()
 
     async def find_sql_by_keyword(
         self,

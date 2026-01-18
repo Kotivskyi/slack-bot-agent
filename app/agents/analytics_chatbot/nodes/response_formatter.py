@@ -5,6 +5,7 @@ No LLM calls - pure formatting logic.
 """
 
 import logging
+import uuid
 from typing import Any
 
 import logfire
@@ -116,8 +117,10 @@ def format_slack_response(state: ChatbotState) -> dict[str, Any]:
             )
 
         # Add action buttons (only if we have results)
-        query_id = state.get("current_query_id", "")
-        if query_id and state.get("query_results"):
+        # Generate a unique action_id (UUID) for button lookups
+        action_id = None
+        if state.get("query_results"):
+            action_id = str(uuid.uuid4())
             blocks.append(
                 {
                     "type": "actions",
@@ -126,19 +129,19 @@ def format_slack_response(state: ChatbotState) -> dict[str, Any]:
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Export CSV", "emoji": True},
                             "action_id": "export_csv",
-                            "value": query_id,
+                            "value": action_id,
                         },
                         {
                             "type": "button",
                             "text": {"type": "plain_text", "text": "Show SQL", "emoji": True},
                             "action_id": "show_sql",
-                            "value": query_id,
+                            "value": action_id,
                         },
                     ],
                 }
             )
 
-        logfire.info("Response formatted", block_count=len(blocks))
+        logfire.info("Response formatted", block_count=len(blocks), action_id=action_id)
 
         # Update conversation history for checkpointing
         user_query = state.get("user_query", "")
@@ -150,4 +153,8 @@ def format_slack_response(state: ChatbotState) -> dict[str, Any]:
             }
         )
 
-        return {"slack_blocks": blocks, "conversation_history": current_history}
+        return {
+            "slack_blocks": blocks,
+            "conversation_history": current_history,
+            "action_id": action_id,
+        }

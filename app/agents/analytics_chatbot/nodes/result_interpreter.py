@@ -65,7 +65,6 @@ def interpret_results(state: ChatbotState) -> dict[str, Any]:
             response = chain.invoke(
                 {
                     "query": state.get("resolved_query") or state.get("user_query", ""),
-                    "assumptions": ", ".join(state.get("assumptions_made", [])) or "None",
                     "row_count": row_count,
                     "columns": ", ".join(columns),
                     "sample_data": str(sample_data),
