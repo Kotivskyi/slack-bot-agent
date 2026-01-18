@@ -369,50 +369,7 @@ make help             # Show all commands
 
 ## Architecture
 
-```mermaid
-graph TB
-    subgraph Slack
-        User[User Message]
-        SlackAPI[Slack API]
-    end
-
-    subgraph "Backend (FastAPI)"
-        Events["/slack/events"]
-        Interactions["/slack/interactions"]
-        SlackService[SlackService]
-        AnalyticsAgent[AnalyticsAgentService]
-        Checkpointer[PostgresCheckpointer]
-    end
-
-    subgraph LangGraph
-        Intent[Intent Router]
-        SQLGen[SQL Generator]
-        Executor[Query Executor]
-        Formatter[Response Formatter]
-    end
-
-    subgraph Infrastructure
-        DB[(PostgreSQL)]
-        LLM[OpenAI API]
-    end
-
-    User --> SlackAPI
-    SlackAPI --> Events
-    SlackAPI --> Interactions
-    Events --> SlackService
-    Interactions --> SlackService
-    SlackService --> AnalyticsAgent
-    AnalyticsAgent --> Checkpointer
-    AnalyticsAgent --> Intent
-    Intent --> SQLGen
-    SQLGen --> LLM
-    SQLGen --> Executor
-    Executor --> DB
-    Executor --> Formatter
-    Formatter --> SlackService
-    SlackService --> SlackAPI
-    Checkpointer --> DB
-```
+See [System Architecture](docs/system-architecture.md) for detailed diagrams.
 
 ### Project Structure
 
