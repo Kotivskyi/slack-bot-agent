@@ -3,6 +3,8 @@
 Provides evaluators for scoring analytics chatbot responses.
 """
 
+import os
+
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext, LLMJudge
 
 from evals.schemas import AnalyticsExpected, AnalyticsInput, AnalyticsOutput
@@ -139,15 +141,19 @@ class ResponseFormatMatch(Evaluator[AnalyticsInput, AnalyticsOutput, AnalyticsEx
         return 1.0 if ctx.output.response_format == ctx.expected_output.response_format else 0.0
 
 
-def create_analytics_judge(model: str = "openai:gpt-4o-mini") -> LLMJudge:
+def create_analytics_judge(model: str | None = None) -> LLMJudge:
     """Create an LLM judge for analytics response evaluation.
 
     Args:
-        model: Model to use for evaluation (default: gpt-4o-mini).
+        model: Model to use for evaluation. Defaults to EVAL_MODEL or AI_MODEL env var.
 
     Returns:
         Configured LLMJudge evaluator.
     """
+    if model is None:
+        default_model = os.environ.get("AI_MODEL", "gpt-4.1")
+        eval_model = os.environ.get("EVAL_MODEL", default_model)
+        model = f"openai:{eval_model}"
     return LLMJudge(
         model=model,
         include_input=True,

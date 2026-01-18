@@ -4,7 +4,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import computed_field, field_validator, ValidationInfo
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -69,31 +69,13 @@ class Settings(BaseSettings):
 
     # === AI Agent (langgraph, openai) ===
     OPENAI_API_KEY: str = ""
-    AI_MODEL: str = "gpt-4o-mini"
-    AI_TEMPERATURE: float = 0.7
+    AI_MODEL: str = "gpt-4.1"
     AI_FRAMEWORK: str = "langgraph"
     LLM_PROVIDER: str = "openai"
 
     # === Slack ===
     SLACK_BOT_TOKEN: str = ""
     SLACK_SIGNING_SECRET: str = ""
-
-    # === CORS ===
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8080"]
-    CORS_ALLOW_CREDENTIALS: bool = True
-    CORS_ALLOW_METHODS: list[str] = ["*"]
-    CORS_ALLOW_HEADERS: list[str] = ["*"]
-
-    @field_validator("CORS_ORIGINS")
-    @classmethod
-    def validate_cors_origins(cls, v: list[str], info: ValidationInfo) -> list[str]:
-        """Warn if CORS_ORIGINS is too permissive in production."""
-        env = info.data.get("ENVIRONMENT", "local") if info.data else "local"
-        if "*" in v and env == "production":
-            raise ValueError(
-                "CORS_ORIGINS cannot contain '*' in production! Specify explicit allowed origins."
-            )
-        return v
 
 
 settings = Settings()

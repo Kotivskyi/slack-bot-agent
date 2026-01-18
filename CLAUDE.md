@@ -202,7 +202,7 @@ Async everywhere in this project:
 Before starting complex tasks, read relevant docs:
 - **Database patterns:** `docs/database_skill.md`
 - **Analytics chatbot:** `docs/agent_architecture.md`
-- **Design document:** `langgraph_slack_chatbot_design.md`
+- **System architecture:** `docs/system-architecture.md`
 
 ## Environment Variables
 

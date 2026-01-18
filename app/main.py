@@ -102,17 +102,6 @@ My FastAPI project
     # Exception handlers
     register_exception_handlers(app)
 
-    # CORS middleware
-    from starlette.middleware.cors import CORSMiddleware
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-        allow_methods=settings.CORS_ALLOW_METHODS,
-        allow_headers=settings.CORS_ALLOW_HEADERS,
-    )
-
     # Include API router
     app.include_router(api_router)
 

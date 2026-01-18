@@ -297,7 +297,45 @@ class SlackService:
                     conversation_history=conversation_history,
                 )
 
-            # 3. Save new turn to DB
+            # 3. Handle text-based export if intent is export_csv but no results
+            if response.intent == "export_csv" and not response.csv_content:
+                export_response = await self.handle_text_export(
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    channel_id=channel_id,
+                )
+                # Save turn with export intent (no new SQL generated)
+                async with get_db_context() as db:
+                    await repo.add_turn(
+                        db,
+                        thread_id=thread_id,
+                        user_message=message,
+                        bot_response=export_response.get("text", ""),
+                        intent="export_csv",
+                        sql_query=None,
+                        action_id=None,
+                    )
+                return export_response
+
+            # 4. Handle text-based show_sql if intent is show_sql but no SQL in response
+            if response.intent == "show_sql" and not response.generated_sql:
+                show_sql_response = await self.handle_text_show_sql(
+                    thread_id=thread_id,
+                )
+                # Save turn with show_sql intent
+                async with get_db_context() as db:
+                    await repo.add_turn(
+                        db,
+                        thread_id=thread_id,
+                        user_message=message,
+                        bot_response=show_sql_response.get("text", ""),
+                        intent="show_sql",
+                        sql_query=None,
+                        action_id=None,
+                    )
+                return show_sql_response
+
+            # 5. Save new turn to DB
             async with get_db_context() as db:
                 await repo.add_turn(
                     db,
@@ -323,6 +361,175 @@ class SlackService:
                 "text": "Sorry, I encountered an error processing your analytics request. Please try again.",
                 "blocks": None,
                 "intent": "error",
+            }
+
+    async def handle_text_export(
+        self,
+        thread_id: str,
+        user_id: str,
+        channel_id: str,
+    ) -> dict[str, Any]:
+        """Handle text-based CSV export request.
+
+        Looks up the most recent SQL query from conversation history
+        and re-executes it to generate CSV.
+
+        Args:
+            thread_id: Thread identifier for the conversation.
+            user_id: The Slack user ID.
+            channel_id: The Slack channel ID.
+
+        Returns:
+            Dict with text, blocks, csv_content, csv_filename.
+        """
+        import csv
+        import io
+
+        from app.db.session import get_analytics_db_context, get_db_context
+        from app.repositories import AnalyticsRepository, ConversationRepository
+
+        try:
+            # Look up the most recent SQL query for this thread
+            async with get_db_context() as db:
+                repo = ConversationRepository()
+                sql_query = await repo.get_most_recent_sql(db, thread_id)
+
+            if not sql_query:
+                return {
+                    "text": "No recent query to export. Please ask a question first!",
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "No recent query to export. Please ask a question first!",
+                            },
+                        }
+                    ],
+                    "intent": "export_csv",
+                }
+
+            # Re-execute the SQL to get results
+            async with get_analytics_db_context() as analytics_db:
+                analytics_repo = AnalyticsRepository()
+                try:
+                    rows, _columns = await analytics_repo.execute_query(analytics_db, sql_query)
+                except Exception as e:
+                    logger.warning(f"Failed to re-execute SQL for text export: {e}")
+                    return {
+                        "text": f"Failed to execute query: {e!s}",
+                        "blocks": None,
+                        "intent": "export_csv",
+                    }
+
+            if not rows:
+                return {
+                    "text": "The query returned no data to export.",
+                    "blocks": None,
+                    "intent": "export_csv",
+                }
+
+            # Generate CSV content
+            csv_buffer = io.StringIO()
+            writer = csv.DictWriter(csv_buffer, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+            csv_content = csv_buffer.getvalue()
+
+            filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            response_text = f"*CSV Export Complete*\n_{len(rows)} rows exported_"
+            return {
+                "text": response_text,
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": response_text,
+                        },
+                    }
+                ],
+                "intent": "export_csv",
+                "csv_content": csv_content,
+                "csv_filename": filename,
+                "csv_title": "Export",
+            }
+
+        except Exception:
+            logger.exception(f"Error handling text export for user {user_id}")
+            return {
+                "text": "Sorry, I encountered an error. Please try again.",
+                "blocks": None,
+                "intent": "export_csv",
+            }
+
+    async def handle_text_show_sql(
+        self,
+        thread_id: str,
+    ) -> dict[str, Any]:
+        """Handle text-based show SQL request.
+
+        Looks up the most recent SQL query from conversation history.
+
+        Args:
+            thread_id: Thread identifier for the conversation.
+
+        Returns:
+            Dict with text, blocks, intent.
+        """
+        from app.db.session import get_db_context
+        from app.repositories import ConversationRepository
+
+        try:
+            # Look up the most recent SQL query for this thread
+            async with get_db_context() as db:
+                repo = ConversationRepository()
+                sql_query = await repo.get_most_recent_sql(db, thread_id)
+
+            if not sql_query:
+                return {
+                    "text": "No SQL queries in history. Please ask a question first!",
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "No SQL queries in history. Please ask a question first!",
+                            },
+                        }
+                    ],
+                    "intent": "show_sql",
+                }
+
+            response_text = "*SQL Query*"
+            return {
+                "text": response_text,
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": response_text,
+                        },
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"```sql\n{sql_query}\n```",
+                        },
+                    },
+                ],
+                "intent": "show_sql",
+            }
+
+        except Exception:
+            logger.exception(f"Error handling text show_sql for thread {thread_id}")
+            return {
+                "text": "Sorry, I encountered an error. Please try again.",
+                "blocks": None,
+                "intent": "show_sql",
             }
 
     async def handle_button_action(
