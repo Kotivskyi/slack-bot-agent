@@ -23,3 +23,14 @@ def instrument_app(app):
 def instrument_asyncpg():
     """Instrument asyncpg for PostgreSQL."""
     logfire.instrument_asyncpg()
+
+
+def instrument_openai():
+    """Instrument OpenAI for LLM call tracing.
+
+    This captures all OpenAI API calls including:
+    - Request prompts and parameters
+    - Response content and token usage
+    - Latency and errors
+    """
+    logfire.instrument_openai()

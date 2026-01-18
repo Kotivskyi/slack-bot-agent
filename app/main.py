@@ -23,9 +23,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # === Startup ===
     setup_logging()
     setup_logfire()
-    from app.core.logfire_setup import instrument_asyncpg
+    from app.core.logfire_setup import instrument_asyncpg, instrument_openai
 
     instrument_asyncpg()
+    instrument_openai()
 
     yield
 
