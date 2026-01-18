@@ -24,10 +24,14 @@ Manual Tests:
 - Write request to DB
 
 Improvements:
-- Reddis: Rate limits,  caching, Task Queues
-- Utilise Slack Threads
-- Slack Status
-- Streaming Reponses
+- Celery + Reddis: Rate limits,  caching, Task Queues
+- Job to pupulate AppMetrics
+
+Features: 
+- More robust app Metrics (Multiple Currencies, Separation between Aquisition sources, also revenue types )
+
+UX Improvements:
+- Slack proceszing Status
 - Implement Streaming
 - Analytics Info DB is External + Validation
 - Data retention policy

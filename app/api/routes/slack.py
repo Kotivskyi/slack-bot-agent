@@ -161,13 +161,16 @@ async def slack_events(
         is_mention = event.type == "app_mention"
 
         if (is_direct_message or is_mention) and event.channel and event.text and event.user:
+            # Use thread_ts if this is a reply in a thread, otherwise use ts
+            # This ensures all messages in a thread share the same thread_id
+            thread_ts = event.thread_ts or event.ts
             # Process message in background to respond quickly to Slack
             background_tasks.add_task(
                 process_slack_message,
                 channel=event.channel,
                 text=event.text,
                 user=event.user,
-                thread_ts=event.ts,
+                thread_ts=thread_ts,
             )
 
     # Always return 200 immediately to acknowledge receipt

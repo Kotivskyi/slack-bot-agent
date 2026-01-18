@@ -17,6 +17,18 @@ from app.agents.analytics_chatbot.state import ChatbotState
 logger = logging.getLogger(__name__)
 
 
+def _update_history(state: ChatbotState, response_text: str) -> list[dict[str, str]]:
+    """Helper to update conversation history."""
+    current_history = list(state.get("conversation_history", []))
+    current_history.append(
+        {
+            "user": state.get("user_query", ""),
+            "bot": response_text[:500],
+        }
+    )
+    return current_history
+
+
 def export_csv(state: ChatbotState) -> dict[str, Any]:
     """Export cached results as CSV.
 
@@ -35,14 +47,16 @@ def export_csv(state: ChatbotState) -> dict[str, Any]:
 
         if not cache:
             logfire.warn("CSV export requested but no cache available")
+            response_text = "No recent query results to export. Please ask a question first!"
             return {
-                "response_text": "No recent query results to export. Please ask a question first!",
+                "response_text": response_text,
+                "conversation_history": _update_history(state, response_text),
                 "slack_blocks": [
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "No recent query results to export. Please ask a question first!",
+                            "text": response_text,
                         },
                     }
                 ],
@@ -65,14 +79,16 @@ def export_csv(state: ChatbotState) -> dict[str, Any]:
 
         if not results:
             logfire.warn("No data to export")
+            response_text = "The query returned no data to export."
             return {
-                "response_text": "The query returned no data to export.",
+                "response_text": response_text,
+                "conversation_history": _update_history(state, response_text),
                 "slack_blocks": [
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "The query returned no data to export.",
+                            "text": response_text,
                         },
                     }
                 ],
@@ -92,14 +108,18 @@ def export_csv(state: ChatbotState) -> dict[str, Any]:
 
         logfire.info("CSV generated", row_count=len(results), filename=filename)
 
+        response_text = (
+            f'*CSV Export Complete*\n_{len(results)} rows exported from:_ "{natural_query}..."'
+        )
         return {
-            "response_text": f'*CSV Export Complete*\n_{len(results)} rows exported from:_ "{natural_query}..."',
+            "response_text": response_text,
+            "conversation_history": _update_history(state, response_text),
             "slack_blocks": [
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f'*CSV Export Complete*\n_{len(results)} rows exported from:_ "{natural_query}..."',
+                        "text": response_text,
                     },
                 }
             ],

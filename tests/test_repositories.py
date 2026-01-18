@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from pydantic import BaseModel
 
-from app.repositories import AnalyticsRepository, CheckpointRepository
+from app.repositories import AnalyticsRepository
 from app.repositories.base import BaseRepository
 
 
@@ -239,8 +239,8 @@ class TestAnalyticsRepository:
             await repository.execute_query(mock_session, "SELECT * FROM nonexistent")
 
 
-class TestCheckpointRepository:
-    """Tests for CheckpointRepository.
+class TestConversationRepository:
+    """Tests for ConversationRepository.
 
     Pattern 1: session passed to methods (not held in __init__).
     """
@@ -258,146 +258,201 @@ class TestCheckpointRepository:
     @pytest.fixture
     def repository(self):
         """Create a test repository (no session in init)."""
-        return CheckpointRepository()
+        from app.repositories import ConversationRepository
 
-    @pytest.fixture
-    def mock_checkpoint(self):
-        """Create a mock checkpoint record."""
-        checkpoint = MagicMock()
-        checkpoint.id = uuid4()
-        checkpoint.thread_id = "thread-123"
-        checkpoint.checkpoint_id = "cp-456"
-        checkpoint.parent_checkpoint_id = "cp-455"
-        checkpoint.checkpoint_data = {"state": "test"}
-        checkpoint.metadata_ = {"source": "test"}
-        checkpoint.created_at = datetime.now()
-        return checkpoint
+        return ConversationRepository()
 
     @pytest.mark.anyio
-    async def test_get_returns_checkpoint_by_thread_and_id(
-        self, repository, mock_session, mock_checkpoint
-    ):
-        """Test get returns checkpoint when found."""
+    async def test_add_turn_truncates_long_bot_response(self, repository, mock_session):
+        """Test add_turn truncates bot_response to 500 chars."""
+        long_response = "A" * 1000
+
+        await repository.add_turn(
+            mock_session,
+            thread_id="thread-1",
+            user_message="question",
+            bot_response=long_response,
+            intent="analytics_query",
+        )
+
+        # Verify the model was added with truncated response
+        mock_session.add.assert_called_once()
+        added_turn = mock_session.add.call_args[0][0]
+        assert len(added_turn.bot_response) == 503  # 500 + "..."
+        assert added_turn.bot_response.endswith("...")
+
+    @pytest.mark.anyio
+    async def test_add_turn_does_not_truncate_short_response(self, repository, mock_session):
+        """Test add_turn does not truncate responses under 500 chars."""
+        short_response = "A" * 100
+
+        await repository.add_turn(
+            mock_session,
+            thread_id="thread-1",
+            user_message="question",
+            bot_response=short_response,
+            intent="analytics_query",
+        )
+
+        added_turn = mock_session.add.call_args[0][0]
+        assert len(added_turn.bot_response) == 100
+        assert not added_turn.bot_response.endswith("...")
+
+    @pytest.mark.anyio
+    async def test_add_turn_stores_sql_query(self, repository, mock_session):
+        """Test add_turn stores SQL query when provided."""
+        sql = "SELECT * FROM apps"
+
+        await repository.add_turn(
+            mock_session,
+            thread_id="thread-1",
+            user_message="list apps",
+            bot_response="Here are your apps",
+            intent="analytics_query",
+            sql_query=sql,
+        )
+
+        added_turn = mock_session.add.call_args[0][0]
+        assert added_turn.sql_query == sql
+
+    @pytest.mark.anyio
+    async def test_get_recent_turns_returns_chronological_order(self, repository, mock_session):
+        """Test get_recent_turns returns turns oldest first."""
+        from app.db.models.conversation import ConversationTurn
+
+        # Mock turns returned in descending order (most recent first)
+        turn1 = ConversationTurn(
+            id=1,
+            thread_id="thread-1",
+            user_message="first",
+            bot_response="response1",
+            intent="analytics_query",
+            created_at=datetime(2024, 1, 1, 10, 0),
+        )
+        turn2 = ConversationTurn(
+            id=2,
+            thread_id="thread-1",
+            user_message="second",
+            bot_response="response2",
+            intent="analytics_query",
+            created_at=datetime(2024, 1, 1, 11, 0),
+        )
+
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_checkpoint
+        mock_result.scalars.return_value.all.return_value = [turn2, turn1]  # DESC order
         mock_session.execute.return_value = mock_result
 
-        result = await repository.get(mock_session, "thread-123", "cp-456")
+        turns = await repository.get_recent_turns(mock_session, "thread-1", limit=10)
 
-        assert result == mock_checkpoint
-        mock_session.execute.assert_called_once()
+        # Should be reversed to chronological (oldest first)
+        assert len(turns) == 2
+        assert turns[0].user_message == "first"
+        assert turns[1].user_message == "second"
 
     @pytest.mark.anyio
-    async def test_get_returns_latest_when_no_checkpoint_id(
-        self, repository, mock_session, mock_checkpoint
-    ):
-        """Test get returns latest checkpoint when checkpoint_id not provided."""
+    async def test_get_most_recent_sql_returns_sql(self, repository, mock_session):
+        """Test get_most_recent_sql returns the SQL query."""
         mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = mock_checkpoint
+        mock_result.scalar_one_or_none.return_value = "SELECT COUNT(*) FROM apps"
         mock_session.execute.return_value = mock_result
 
-        result = await repository.get(mock_session, "thread-123")
+        sql = await repository.get_most_recent_sql(mock_session, "thread-1")
 
-        assert result == mock_checkpoint
+        assert sql == "SELECT COUNT(*) FROM apps"
 
     @pytest.mark.anyio
-    async def test_get_returns_none_when_not_found(self, repository, mock_session):
-        """Test get returns None when checkpoint not found."""
+    async def test_get_most_recent_sql_returns_none_when_no_sql(self, repository, mock_session):
+        """Test get_most_recent_sql returns None when no SQL found."""
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        result = await repository.get(mock_session, "nonexistent-thread")
+        sql = await repository.get_most_recent_sql(mock_session, "thread-1")
 
-        assert result is None
-
-    @pytest.mark.anyio
-    async def test_put_creates_checkpoint(self, repository, mock_session):
-        """Test put creates a new checkpoint."""
-        checkpoint_data = {"state": "test", "messages": []}
-
-        await repository.put(
-            mock_session,
-            thread_id="thread-123",
-            checkpoint_id="cp-456",
-            parent_checkpoint_id="cp-455",
-            checkpoint_data=checkpoint_data,
-            metadata={"source": "test"},
-        )
-
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-        mock_session.refresh.assert_called_once()
-
-        # Verify the checkpoint was created with correct data
-        added_checkpoint = mock_session.add.call_args[0][0]
-        assert added_checkpoint.thread_id == "thread-123"
-        assert added_checkpoint.checkpoint_id == "cp-456"
-        assert added_checkpoint.parent_checkpoint_id == "cp-455"
-        assert added_checkpoint.checkpoint_data == checkpoint_data
+        assert sql is None
 
     @pytest.mark.anyio
-    async def test_put_without_metadata(self, repository, mock_session):
-        """Test put works without metadata."""
-        await repository.put(
-            mock_session,
-            thread_id="thread-123",
-            checkpoint_id="cp-456",
-            parent_checkpoint_id=None,
-            checkpoint_data={"state": "test"},
-        )
-
-        mock_session.add.assert_called_once()
-        added_checkpoint = mock_session.add.call_args[0][0]
-        assert added_checkpoint.metadata_ is None
-
-    @pytest.mark.anyio
-    async def test_list_returns_checkpoints(self, repository, mock_session, mock_checkpoint):
-        """Test list returns checkpoints for thread."""
+    async def test_find_sql_by_keyword_returns_matching_sql(self, repository, mock_session):
+        """Test find_sql_by_keyword returns SQL for matching user message."""
         mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = [mock_checkpoint]
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.scalar_one_or_none.return_value = "SELECT * FROM apps WHERE country = 'US'"
         mock_session.execute.return_value = mock_result
 
-        result = await repository.list(mock_session, "thread-123", limit=10)
+        sql = await repository.find_sql_by_keyword(mock_session, "thread-1", "country")
 
-        assert len(result) == 1
-        assert result[0] == mock_checkpoint
+        assert sql == "SELECT * FROM apps WHERE country = 'US'"
 
     @pytest.mark.anyio
-    async def test_list_returns_empty_when_no_checkpoints(self, repository, mock_session):
-        """Test list returns empty list when no checkpoints."""
+    async def test_find_sql_by_keyword_returns_none_when_no_match(self, repository, mock_session):
+        """Test find_sql_by_keyword returns None when no match found."""
         mock_result = MagicMock()
-        mock_scalars = MagicMock()
-        mock_scalars.all.return_value = []
-        mock_result.scalars.return_value = mock_scalars
+        mock_result.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = mock_result
 
-        result = await repository.list(mock_session, "empty-thread")
+        sql = await repository.find_sql_by_keyword(mock_session, "thread-1", "nonexistent")
 
-        assert result == []
+        assert sql is None
 
     @pytest.mark.anyio
-    async def test_delete_thread_removes_checkpoints(self, repository, mock_session):
-        """Test delete_thread removes all checkpoints for thread."""
+    async def test_cleanup_old_turns_deletes_and_returns_count(self, repository, mock_session):
+        """Test cleanup_old_turns deletes old turns and returns count."""
         mock_result = MagicMock()
         mock_result.rowcount = 5
         mock_session.execute.return_value = mock_result
 
-        count = await repository.delete_thread(mock_session, "thread-123")
+        deleted = await repository.cleanup_old_turns(mock_session, max_age_hours=24)
 
-        assert count == 5
-        mock_session.execute.assert_called_once()
+        assert deleted == 5
         mock_session.flush.assert_called_once()
 
-    @pytest.mark.anyio
-    async def test_delete_thread_returns_zero_when_none_deleted(self, repository, mock_session):
-        """Test delete_thread returns 0 when no checkpoints to delete."""
-        mock_result = MagicMock()
-        mock_result.rowcount = 0
-        mock_session.execute.return_value = mock_result
 
-        count = await repository.delete_thread(mock_session, "nonexistent-thread")
+class TestTurnsToHistory:
+    """Tests for turns_to_history helper function."""
 
-        assert count == 0
+    def test_turns_to_history_converts_correctly(self):
+        """Test turns_to_history converts turns to history dict format."""
+        from app.db.models.conversation import ConversationTurn
+        from app.repositories import turns_to_history
+
+        turns = [
+            ConversationTurn(
+                id=1,
+                thread_id="thread-1",
+                user_message="question 1",
+                bot_response="answer 1",
+                intent="analytics_query",
+                sql_query="SELECT 1",
+                created_at=datetime(2024, 1, 1, 10, 0),
+            ),
+            ConversationTurn(
+                id=2,
+                thread_id="thread-1",
+                user_message="question 2",
+                bot_response="answer 2",
+                intent="follow_up",
+                sql_query=None,
+                created_at=datetime(2024, 1, 1, 11, 0),
+            ),
+        ]
+
+        history = turns_to_history(turns)
+
+        assert len(history) == 2
+        assert history[0]["user"] == "question 1"
+        assert history[0]["bot"] == "answer 1"
+        assert history[0]["intent"] == "analytics_query"
+        assert history[0]["sql"] == "SELECT 1"
+        assert history[0]["timestamp"] == "2024-01-01T10:00:00"
+
+        assert history[1]["user"] == "question 2"
+        assert history[1]["bot"] == "answer 2"
+        assert history[1]["intent"] == "follow_up"
+        assert history[1]["sql"] is None
+
+    def test_turns_to_history_empty_list(self):
+        """Test turns_to_history handles empty list."""
+        from app.repositories import turns_to_history
+
+        history = turns_to_history([])
+
+        assert history == []

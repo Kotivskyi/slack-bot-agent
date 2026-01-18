@@ -14,9 +14,9 @@ from app.services.agent import AgentService
 DBSession = Annotated[AsyncSession, Depends(get_db_session)]
 
 
-def get_agent_service(db: DBSession) -> AgentService:
-    """Create AgentService instance with database session."""
-    return AgentService(db)
+def get_agent_service() -> AgentService:
+    """Create AgentService instance."""
+    return AgentService()
 
 
 AgentSvc = Annotated[AgentService, Depends(get_agent_service)]

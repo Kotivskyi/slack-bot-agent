@@ -140,4 +140,14 @@ def format_slack_response(state: ChatbotState) -> dict[str, Any]:
 
         logfire.info("Response formatted", block_count=len(blocks))
 
-        return {"slack_blocks": blocks}
+        # Update conversation history for checkpointing
+        user_query = state.get("user_query", "")
+        current_history = list(state.get("conversation_history", []))
+        current_history.append(
+            {
+                "user": user_query,
+                "bot": response_text[:500] if response_text else "",
+            }
+        )
+
+        return {"slack_blocks": blocks, "conversation_history": current_history}

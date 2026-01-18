@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import logging
 import time
-from collections import defaultdict
+from datetime import datetime
 from typing import Any
 
 from slack_sdk.errors import SlackApiError
@@ -13,12 +13,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
-
-# Session state storage (use Redis in production)
-# Maps thread_id -> {"conversation_history": [...], "query_cache": {...}}
-_session_states: dict[str, dict[str, Any]] = defaultdict(
-    lambda: {"conversation_history": [], "query_cache": {}}
-)
 
 
 class SlackService:
@@ -161,7 +155,6 @@ class SlackService:
             Generated AI response.
         """
         from app.agents import AgentContext
-        from app.db.session import get_db_context
         from app.services.agent import AgentService
 
         # Thread ID for conversation continuity
@@ -173,14 +166,13 @@ class SlackService:
         }
 
         try:
-            async with get_db_context() as db:
-                agent_service = AgentService(db)
-                output, _ = await agent_service.run(
-                    user_input=message,
-                    thread_id=thread_id,
-                    history=[],  # Checkpointer handles history via thread_id
-                    context=context,
-                )
+            agent_service = AgentService()
+            output, _ = await agent_service.run(
+                user_input=message,
+                thread_id=thread_id,
+                history=[],
+                context=context,
+            )
             return output or "I couldn't generate a response."
         except Exception:
             logger.exception(f"Error generating AI response for user {user_id}")
@@ -205,38 +197,52 @@ class SlackService:
             Dict with text, blocks, and any file upload info.
         """
         from app.db.session import get_analytics_db_context, get_db_context
+        from app.repositories import ConversationRepository, turns_to_history
         from app.services.agent import AnalyticsAgentService
 
         # Thread ID for conversation continuity
         thread_id = f"slack_thread_{thread_ts}" if thread_ts else f"slack_user_{user_id}"
 
-        # Get session state
-        session = _session_states[thread_id]
-
         try:
-            async with (
-                get_db_context() as checkpoint_db,
-                get_analytics_db_context() as analytics_db,
-            ):
-                analytics_service = AnalyticsAgentService(
-                    checkpoint_db=checkpoint_db,
-                    analytics_db=analytics_db,
-                )
+            # 1. Load history from DB
+            async with get_db_context() as db:
+                repo = ConversationRepository()
+                turns = await repo.get_recent_turns(db, thread_id, limit=10)
+                conversation_history = turns_to_history(turns)
+
+            # 2. Run analytics agent
+            async with get_analytics_db_context() as analytics_db:
+                analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
                 response = await analytics_service.run(
                     user_query=message,
                     thread_id=thread_id,
                     user_id=user_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    conversation_history=session["conversation_history"],
-                    query_cache=session["query_cache"],
+                    conversation_history=conversation_history,
+                    query_cache={},  # Rebuilt per request through graph execution
                 )
 
-            # Update session state
-            _session_states[thread_id] = {
-                "conversation_history": response.conversation_history or [],
-                "query_cache": response.query_cache or {},
-            }
+            # 3. Save new turn to DB
+            async with get_db_context() as db:
+                # Extract SQL from query_cache (most recent query)
+                sql_query = None
+                query_cache = response.query_cache or {}
+                if query_cache:
+                    # Get the most recent cache entry by timestamp
+                    most_recent = max(
+                        query_cache.values(), key=lambda x: x.get("timestamp", datetime.min)
+                    )
+                    sql_query = most_recent.get("sql")
+
+                await repo.add_turn(
+                    db,
+                    thread_id=thread_id,
+                    user_message=message,
+                    bot_response=response.text,
+                    intent=response.intent or "unknown",
+                    sql_query=sql_query,
+                )
 
             return {
                 "text": response.text,
@@ -274,11 +280,12 @@ class SlackService:
         Returns:
             Dict with response text and blocks.
         """
+        from app.db.session import get_analytics_db_context, get_db_context
+        from app.repositories import AnalyticsRepository, ConversationRepository, turns_to_history
+        from app.services.agent import AnalyticsAgentService
+
         # Get the thread ID based on the original thread
         thread_id = f"slack_thread_{thread_ts}"
-
-        # Get session state with the query cache
-        session = _session_states.get(thread_id, {"conversation_history": [], "query_cache": {}})
 
         # Create appropriate user query based on action
         if action_id == "export_csv":
@@ -291,26 +298,46 @@ class SlackService:
                 "blocks": None,
             }
 
-        from app.db.session import get_analytics_db_context, get_db_context
-        from app.services.agent import AnalyticsAgentService
-
         try:
-            async with (
-                get_db_context() as checkpoint_db,
-                get_analytics_db_context() as analytics_db,
-            ):
-                analytics_service = AnalyticsAgentService(
-                    checkpoint_db=checkpoint_db,
-                    analytics_db=analytics_db,
-                )
+            # 1. Load history from DB
+            async with get_db_context() as db:
+                repo = ConversationRepository()
+                turns = await repo.get_recent_turns(db, thread_id, limit=10)
+                conversation_history = turns_to_history(turns)
+
+            # 2. Rebuild query_cache by re-executing SQL for turns that have SQL
+            # This is needed because CSV export requires the actual results data
+            query_cache: dict[str, Any] = {}
+            async with get_analytics_db_context() as analytics_db:
+                analytics_repo = AnalyticsRepository()
+                for i, turn in enumerate(turns):
+                    if turn.sql_query:
+                        try:
+                            rows, _columns = await analytics_repo.execute_query(
+                                analytics_db, turn.sql_query
+                            )
+                            # Use index-based key to allow referencing specific queries
+                            query_id = f"turn_{i}"
+                            query_cache[query_id] = {
+                                "sql": turn.sql_query,
+                                "results": rows,
+                                "timestamp": turn.created_at,
+                                "natural_query": turn.user_message,
+                                "assumptions": [],
+                            }
+                        except Exception as e:
+                            logger.warning(f"Failed to re-execute SQL for turn {i}: {e}")
+
+                # 3. Run analytics agent
+                analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
                 response = await analytics_service.run(
                     user_query=user_query,
                     thread_id=thread_id,
                     user_id=user_id,
                     channel_id=channel_id,
                     thread_ts=thread_ts,
-                    conversation_history=session["conversation_history"],
-                    query_cache=session["query_cache"],
+                    conversation_history=conversation_history,
+                    query_cache=query_cache,
                 )
 
             return {
@@ -326,17 +353,6 @@ class SlackService:
                 "text": "Sorry, I encountered an error. Please try again.",
                 "blocks": None,
             }
-
-    def get_session_state(self, thread_id: str) -> dict[str, Any]:
-        """Get session state for a thread.
-
-        Args:
-            thread_id: The thread identifier.
-
-        Returns:
-            Session state dict with conversation_history and query_cache.
-        """
-        return _session_states.get(thread_id, {"conversation_history": [], "query_cache": {}})
 
 
 # Service instance

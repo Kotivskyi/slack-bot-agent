@@ -5,7 +5,6 @@ Contains the graph building function that creates the compiled LangGraph.
 
 from functools import partial
 
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -16,7 +15,6 @@ from app.core.config import settings
 
 
 def build_assistant_graph(
-    checkpointer: BaseCheckpointSaver | None = None,
     model_name: str | None = None,
     temperature: float | None = None,
     system_prompt: str | None = None,
@@ -29,7 +27,6 @@ def build_assistant_graph(
     - Conditional edges that loop back for tool execution or end
 
     Args:
-        checkpointer: Optional checkpoint saver for state persistence.
         model_name: Optional model name override (defaults to settings).
         temperature: Optional temperature override (defaults to settings).
         system_prompt: Optional system prompt override.
@@ -66,4 +63,4 @@ def build_assistant_graph(
     )
     workflow.add_edge("tools", "agent")
 
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile()

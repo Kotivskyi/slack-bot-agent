@@ -77,6 +77,7 @@ make test             # Run tests
 make lint             # Check code quality
 make format           # Auto-format code
 make db-upgrade       # Apply migrations
+make db-seed          # Seed database with sample data
 
 # Or directly with uv
 uv run slack_analytics_app server run --reload

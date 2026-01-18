@@ -2,10 +2,11 @@
 
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.base import BaseRepository
-from app.repositories.checkpoint import CheckpointRepository
+from app.repositories.conversation import ConversationRepository, turns_to_history
 
 __all__ = [
     "AnalyticsRepository",
     "BaseRepository",
-    "CheckpointRepository",
+    "ConversationRepository",
+    "turns_to_history",
 ]

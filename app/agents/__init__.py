@@ -10,7 +10,6 @@ from app.agents.assistant import (
     AgentState,
     build_assistant_graph,
 )
-from app.agents.checkpointer import PostgresCheckpointer
 
 # Legacy imports for backwards compatibility (deprecated)
 from app.agents.langgraph_assistant import LangGraphAssistant, get_agent
@@ -20,7 +19,6 @@ __all__ = [
     "AgentContext",
     "AgentState",
     "LangGraphAssistant",
-    "PostgresCheckpointer",
     "build_assistant_graph",
     "get_agent",
 ]

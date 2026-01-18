@@ -37,10 +37,21 @@ def polite_decline(state: ChatbotState) -> dict[str, Any]:
     Returns:
         Dict with response_text and slack_blocks fields.
     """
-    logfire.info("Off-topic query declined", query=state.get("user_query", "")[:100])
+    user_query = state.get("user_query", "")
+    logfire.info("Off-topic query declined", query=user_query[:100])
+
+    # Update conversation history for checkpointing
+    current_history = list(state.get("conversation_history", []))
+    current_history.append(
+        {
+            "user": user_query,
+            "bot": DECLINE_MESSAGE[:500],
+        }
+    )
 
     return {
         "response_text": DECLINE_MESSAGE,
+        "conversation_history": current_history,
         "slack_blocks": [
             {
                 "type": "section",

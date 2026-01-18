@@ -62,9 +62,19 @@ def handle_error(state: ChatbotState) -> dict[str, Any]:
         f'_Original question: "{user_query}"_'
     )
 
+    # Update conversation history for checkpointing
+    current_history = list(state.get("conversation_history", []))
+    current_history.append(
+        {
+            "user": user_query,
+            "bot": error_response[:500],
+        }
+    )
+
     return {
         "response_text": error_response,
         "response_format": "error",
+        "conversation_history": current_history,
         "slack_blocks": [
             {
                 "type": "section",

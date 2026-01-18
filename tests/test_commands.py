@@ -103,22 +103,23 @@ class TestRegisterCommands:
 class TestSeedCommand:
     """Tests for the seed command."""
 
-    def test_seed_runs(self):
-        """Test seed command executes."""
+    def test_seed_dry_run(self):
+        """Test seed command dry-run mode."""
         from app.commands.seed import seed
 
         runner = CliRunner()
-        result = runner.invoke(seed, [])
+        result = runner.invoke(seed, ["--dry-run"])
         assert result.exit_code == 0
-        assert "No seedable entities configured" in result.output
+        assert "Dry run complete" in result.output
 
     def test_seed_with_options(self):
         """Test seed command accepts options."""
         from app.commands.seed import seed
 
         runner = CliRunner()
-        result = runner.invoke(seed, ["--dry-run", "--clear", "--count", "5"])
+        result = runner.invoke(seed, ["--dry-run", "--days", "5"])
         assert result.exit_code == 0
+        assert "Would create" in result.output
 
 
 class TestHelloCommand:

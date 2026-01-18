@@ -1,4 +1,4 @@
-.PHONY: install format lint test run clean help db-init
+.PHONY: install format lint test run clean help db-init db-seed
 
 # === Setup ===
 install:
@@ -50,6 +50,9 @@ db-migrate:
 
 db-upgrade:
 	uv run slack_analytics_app db upgrade
+
+db-seed:
+	uv run slack_analytics_app cmd seed
 
 db-downgrade:
 	uv run slack_analytics_app db downgrade
@@ -147,6 +150,7 @@ help:
 	@echo "  make db-init       Initialize database (start + migrate)"
 	@echo "  make db-migrate    Create new migration"
 	@echo "  make db-upgrade    Apply migrations"
+	@echo "  make db-seed       Seed database with sample data"
 	@echo "  make db-downgrade  Rollback last migration"
 	@echo "  make db-current    Show current migration"
 	@echo ""

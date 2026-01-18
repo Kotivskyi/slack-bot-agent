@@ -16,6 +16,7 @@ make lint             # Check code quality
 make format           # Auto-format code
 make db-init          # Initialize database (start + migrate)
 make db-upgrade       # Apply migrations
+make db-seed          # Seed database with sample data
 make db-migrate       # Create new migration
 
 # Or directly with uv

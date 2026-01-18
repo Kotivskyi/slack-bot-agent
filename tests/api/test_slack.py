@@ -286,3 +286,146 @@ async def test_app_mention_event(
             thread_ts="1234567890.123456",
         )
         mock_send.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_thread_reply_uses_thread_ts_for_conversation_continuity(
+    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+):
+    """Test that replies in a thread use thread_ts (not ts) for thread_id.
+
+    This ensures all messages in a thread share the same thread_id,
+    allowing conversation history to be correctly loaded from the database.
+
+    Slack threading:
+    - First message: ts="1234.0" (becomes the thread root)
+    - Reply: ts="1235.0" (reply's unique ID), thread_ts="1234.0" (thread root)
+
+    We must use thread_ts for replies so they share thread_id with the original message.
+    """
+    # Simulate a reply in a thread - has both ts (reply timestamp) and thread_ts (root)
+    thread_root_ts = "1234567890.000000"  # Original message timestamp
+    reply_ts = "1234567890.999999"  # Reply's own timestamp
+
+    body = json.dumps(
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "app_mention",
+                "user": "U123456",
+                "text": "<@U987654> follow up question",
+                "channel": "C123456",
+                "ts": reply_ts,  # Reply's timestamp
+                "thread_ts": thread_root_ts,  # Thread root timestamp
+            },
+        }
+    )
+    signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
+
+    with (
+        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
+        patch(
+            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
+        ) as mock_generate,
+        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
+    ):
+        mock_generate.return_value = {
+            "text": "AI response",
+            "blocks": None,
+            "intent": "follow_up",
+        }
+        mock_send.return_value = {"ok": True}
+
+        response = await client.post(
+            "/slack/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Slack-Request-Timestamp": slack_timestamp,
+                "X-Slack-Signature": signature,
+            },
+        )
+
+        assert response.status_code == 200
+        # CRITICAL: thread_ts should be the thread root, NOT the reply's ts
+        # This ensures conversation history is loaded correctly
+        mock_generate.assert_called_once_with(
+            message="<@U987654> follow up question",
+            user_id="U123456",
+            channel_id="C123456",
+            thread_ts=thread_root_ts,  # Must use thread root, not reply ts
+        )
+        # Response should also go to thread root
+        mock_send.assert_called_once_with(
+            channel="C123456",
+            text="AI response",
+            thread_ts=thread_root_ts,
+            blocks=None,
+        )
+
+
+@pytest.mark.anyio
+async def test_standalone_message_uses_ts_when_no_thread(
+    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+):
+    """Test that standalone messages (not in a thread) use ts as thread_id.
+
+    When a message is not a reply (no thread_ts), we use ts as the thread identifier.
+    This message will become the thread root if someone replies to it.
+    """
+    message_ts = "1234567890.123456"
+
+    body = json.dumps(
+        {
+            "type": "event_callback",
+            "event": {
+                "type": "message",
+                "user": "U123456",
+                "text": "New question",
+                "channel": "D123456",
+                "channel_type": "im",
+                "ts": message_ts,
+                # No thread_ts - this is a new message, not a reply
+            },
+        }
+    )
+    signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
+
+    with (
+        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
+        patch(
+            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
+        ) as mock_generate,
+        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
+    ):
+        mock_generate.return_value = {
+            "text": "AI response",
+            "blocks": None,
+            "intent": "analytics_query",
+        }
+        mock_send.return_value = {"ok": True}
+
+        response = await client.post(
+            "/slack/events",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Slack-Request-Timestamp": slack_timestamp,
+                "X-Slack-Signature": signature,
+            },
+        )
+
+        assert response.status_code == 200
+        # When no thread_ts, use ts as the thread identifier
+        mock_generate.assert_called_once_with(
+            message="New question",
+            user_id="U123456",
+            channel_id="D123456",
+            thread_ts=message_ts,  # Falls back to ts when no thread_ts
+        )
+        mock_send.assert_called_once_with(
+            channel="D123456",
+            text="AI response",
+            thread_ts=message_ts,
+            blocks=None,
+        )

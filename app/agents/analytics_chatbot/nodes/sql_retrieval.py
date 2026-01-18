@@ -14,6 +14,18 @@ from app.agents.analytics_chatbot.state import ChatbotState
 logger = logging.getLogger(__name__)
 
 
+def _update_history(state: ChatbotState, response_text: str) -> list[dict[str, str]]:
+    """Helper to update conversation history."""
+    current_history = list(state.get("conversation_history", []))
+    current_history.append(
+        {
+            "user": state.get("user_query", ""),
+            "bot": response_text[:500],
+        }
+    )
+    return current_history
+
+
 def retrieve_sql(state: ChatbotState) -> dict[str, Any]:
     """Retrieve SQL statement from cache.
 
@@ -30,14 +42,16 @@ def retrieve_sql(state: ChatbotState) -> dict[str, Any]:
 
         if not cache:
             logfire.warn("SQL retrieval requested but no cache available")
+            response_text = "No SQL queries in history. Please ask a question first!"
             return {
-                "response_text": "No SQL queries in history. Please ask a question first!",
+                "response_text": response_text,
+                "conversation_history": _update_history(state, response_text),
                 "slack_blocks": [
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "No SQL queries in history. Please ask a question first!",
+                            "text": response_text,
                         },
                     }
                 ],
@@ -84,15 +98,17 @@ def retrieve_sql(state: ChatbotState) -> dict[str, Any]:
 
         logfire.info("SQL retrieval complete", sql_length=len(sql))
 
+        response_text = f'*SQL Query*\n_For: "{natural_query}..."_'
         # Format as Slack code snippet
         return {
-            "response_text": f'*SQL Query*\n_For: "{natural_query}..."_',
+            "response_text": response_text,
+            "conversation_history": _update_history(state, response_text),
             "slack_blocks": [
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f'*SQL Query*\n_For: "{natural_query}..."_',
+                        "text": response_text,
                     },
                 },
                 {

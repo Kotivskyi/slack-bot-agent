@@ -1,11 +1,23 @@
 {
   "mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp"]
+    },
     "logfire": {
       "command": "uvx",
       "args": ["logfire-mcp"],
       "env": {
         "LOGFIRE_READ_TOKEN": "${LOGFIRE_READ_TOKEN}"
       }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/slack_analytics_app"
+      ]
     }
   }
 }

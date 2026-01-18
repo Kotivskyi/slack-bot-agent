@@ -13,6 +13,7 @@ class SlackEvent(BaseModel):
     text: str | None = None
     channel: str | None = None
     ts: str | None = None
+    thread_ts: str | None = None  # Thread root timestamp (for replies in a thread)
     bot_id: str | None = None
     channel_type: str | None = None
 

@@ -83,7 +83,9 @@ def generate_metrics(
 
     installs = int(base_installs * weekend_multiplier * random.uniform(0.7, 1.3))
     in_app_revenue = round(
-        Decimal(str(installs * 0.05 * base_revenue_multiplier * country_mult * random.uniform(0.5, 2.0))),
+        Decimal(
+            str(installs * 0.05 * base_revenue_multiplier * country_mult * random.uniform(0.5, 2.0))
+        ),
         2,
     )
     ads_revenue = round(
@@ -144,7 +146,9 @@ async def seed_data(days: int, clear: bool, dry_run: bool) -> int:
 
 
 @command("seed", help="Seed database with sample app metrics data")
-@click.option("--days", "-d", default=90, type=int, help="Number of days of data to generate (default: 90)")
+@click.option(
+    "--days", "-d", default=90, type=int, help="Number of days of data to generate (default: 90)"
+)
 @click.option("--clear", is_flag=True, help="Clear existing data before seeding")
 @click.option("--dry-run", is_flag=True, help="Show what would be created without making changes")
 def seed(

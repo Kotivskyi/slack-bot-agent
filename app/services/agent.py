@@ -1,7 +1,7 @@
 """Agent service for managing AI agent interactions.
 
 Provides a high-level interface for running and streaming agent responses,
-handling conversation history, checkpointing, and tool execution.
+handling conversation history and tool execution.
 """
 
 import logging
@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import AgentContext, build_assistant_graph
 from app.agents.analytics_chatbot import AnalyticsChatbot
-from app.agents.checkpointer import PostgresCheckpointer
 
 if TYPE_CHECKING:
     from app.repositories import AnalyticsRepository
@@ -64,11 +63,11 @@ class AnalyticsResponse:
 class AgentService:
     """Service for AI agent interactions.
 
-    Provides high-level methods for running agents with checkpointing,
+    Provides high-level methods for running agents with
     conversation history management, and streaming support.
 
     Usage:
-        agent_service = AgentService(db)
+        agent_service = AgentService()
         output, tool_events = await agent_service.run(
             user_input="Hello",
             thread_id="thread-123",
@@ -82,7 +81,6 @@ class AgentService:
 
     def __init__(
         self,
-        db: AsyncSession,
         *,
         model_name: str | None = None,
         temperature: float | None = None,
@@ -91,31 +89,20 @@ class AgentService:
         """Initialize the agent service.
 
         Args:
-            db: Database session for checkpointing.
             model_name: Optional model name override.
             temperature: Optional temperature override.
             system_prompt: Optional system prompt override.
         """
-        self.db = db
         self._model_name = model_name
         self._temperature = temperature
         self._system_prompt = system_prompt
-        self._checkpointer: PostgresCheckpointer | None = None
         self._graph: CompiledStateGraph | None = None
-
-    @property
-    def checkpointer(self) -> PostgresCheckpointer:
-        """Get or create the PostgresCheckpointer instance."""
-        if self._checkpointer is None:
-            self._checkpointer = PostgresCheckpointer(self.db)
-        return self._checkpointer
 
     @property
     def graph(self) -> CompiledStateGraph:
         """Get or create the compiled graph instance."""
         if self._graph is None:
             self._graph = build_assistant_graph(
-                checkpointer=self.checkpointer,
                 model_name=self._model_name,
                 temperature=self._temperature,
                 system_prompt=self._system_prompt,
@@ -337,10 +324,7 @@ class AnalyticsAgentService:
     with SQL generation, caching, and Slack Block Kit formatting.
 
     Usage:
-        analytics_service = AnalyticsAgentService(
-            checkpoint_db=checkpoint_db,
-            analytics_db=analytics_db,
-        )
+        analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
         response = await analytics_service.run(
             user_query="How many apps do we have?",
             thread_id="thread-123",
@@ -351,27 +335,16 @@ class AnalyticsAgentService:
 
     def __init__(
         self,
-        checkpoint_db: AsyncSession,
         analytics_db: AsyncSession,
     ):
         """Initialize the analytics agent service.
 
         Args:
-            checkpoint_db: Database session for LangGraph checkpoint persistence.
             analytics_db: Database session for analytics SQL queries (read-only).
         """
-        self._checkpoint_db = checkpoint_db
         self._analytics_db = analytics_db
-        self._checkpointer: PostgresCheckpointer | None = None
         self._analytics_repository: AnalyticsRepository | None = None
         self._chatbot: AnalyticsChatbot | None = None
-
-    @property
-    def checkpointer(self) -> PostgresCheckpointer:
-        """Get or create the PostgresCheckpointer instance."""
-        if self._checkpointer is None:
-            self._checkpointer = PostgresCheckpointer(self._checkpoint_db)
-        return self._checkpointer
 
     @property
     def analytics_repository(self) -> "AnalyticsRepository":
@@ -393,7 +366,6 @@ class AnalyticsAgentService:
             self._chatbot = AnalyticsChatbot(
                 db=self._analytics_db,
                 repository=self.analytics_repository,
-                checkpointer=self.checkpointer,
             )
         return self._chatbot
 
@@ -434,21 +406,13 @@ class AnalyticsAgentService:
             query_cache=query_cache,
         )
 
-        # Build updated conversation history
-        updated_history = list(conversation_history or [])
-        updated_history.append(
-            {
-                "user": user_query,
-                "bot": result.get("response_text", "")[:500],
-            }
-        )
-
+        # Use conversation_history from graph result (updated by terminal nodes)
         response = AnalyticsResponse(
             text=result.get("response_text", ""),
             slack_blocks=result.get("slack_blocks"),
             intent=result.get("intent"),
             query_cache=result.get("query_cache", {}),
-            conversation_history=updated_history,
+            conversation_history=result.get("conversation_history", []),
             csv_content=result.get("csv_content"),
             csv_filename=result.get("csv_filename"),
             csv_title=result.get("csv_title"),
