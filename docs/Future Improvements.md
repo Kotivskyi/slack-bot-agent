@@ -47,6 +47,7 @@
 - Integration tests
 - CI pipeline (GitHub Actions)
 - Jailbreak testing
+- Separate DB instance for publicly avaiable data
 - Rate limiting
 - Query timeout
 - Scheduled data pipeline to populate analytics DB
