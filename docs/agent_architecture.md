@@ -81,25 +81,26 @@ class ChatbotState(TypedDict):
     confidence: float
 
     # Context resolution (for follow-ups)
-    resolved_query: str
+    resolved_query: str | None
     referenced_query_id: str | None
 
     # SQL pipeline
-    generated_sql: str
+    generated_sql: str | None
     sql_error: str | None
     retry_count: int
-    query_results: list[dict[str, Any]]
+    query_results: list[dict[str, Any]] | None
     row_count: int
     column_names: list[str]
 
     # Query tracking
-    current_query_id: str | None
+    current_query_id: str | None      # MD5 hash of SQL (8 chars)
+    action_id: str | None             # UUID for button action lookups
 
     # Response
     response_format: Literal["simple", "table", "error"]
     response_text: str
     assumptions_made: list[str]
-    slack_blocks: list[dict[str, Any]]
+    slack_blocks: list[dict[str, Any]] | None
 
     # CSV export
     csv_content: str | None
@@ -191,22 +192,30 @@ class ConversationTurn(Base):
     bot_response: Mapped[str]       # Bot's response (truncated to 500 chars)
     intent: Mapped[str]             # Classified intent
     sql_query: Mapped[str | None]   # SQL if analytics query
+    action_id: Mapped[str | None]   # UUID for button action lookups (indexed)
     created_at: Mapped[datetime]    # Timestamp (indexed with thread_id)
 ```
+
+**Indexes:**
+- `(thread_id, created_at DESC)` - Efficient recent turns lookup
+- `action_id` - Fast button action lookups
 
 ### Repository
 
 ```python
 # app/repositories/conversation.py
 class ConversationRepository:
-    async def add_turn(db, thread_id, user_message, bot_response, intent, sql_query)
+    async def add_turn(db, thread_id, user_message, bot_response, intent, sql_query, action_id)
     async def get_recent_turns(db, thread_id, limit=10) -> list[ConversationTurn]
     async def get_most_recent_sql(db, thread_id) -> str | None
+    async def get_turn_by_action_id(db, action_id) -> ConversationTurn | None
     async def find_sql_by_keyword(db, thread_id, keyword) -> str | None
     async def cleanup_old_turns(db, max_age_hours=24)
 
 def turns_to_history(turns: list[ConversationTurn]) -> list[dict]
 ```
+
+Note: `bot_response` is automatically truncated to 500 characters when saving.
 
 ### Usage in Workflow
 
@@ -222,17 +231,32 @@ Responses are formatted using Slack Block Kit:
 1. **Section**: Main response text
 2. **Section**: Table (for complex results, using monospace formatting)
 3. **Context**: Assumptions made (if any)
-4. **Actions**: Export CSV and Show SQL buttons (if results exist)
+4. **Actions**: Export CSV and Show SQL buttons with unique `action_id` UUID (if results exist)
+
+### Message Truncation
+
+SlackService automatically truncates responses to comply with Slack API limits:
+
+| Limit | Value |
+|-------|-------|
+| Max text length | 40,000 chars |
+| Max block text length | 3,000 chars |
+| Max blocks per message | 50 |
+
+Code blocks (tables) are truncated at line boundaries with a notice:
+`_...table truncated. Click *Export CSV* for complete data._`
 
 ## Button Action Handling
 
 When users click Export CSV or Show SQL buttons:
 
-1. **SlackService.handle_button_action()** receives the action
-2. Query ID is extracted from button value
-3. SQL is retrieved from `conversation_turns` table
-4. Query is re-executed using AnalyticsRepository
-5. Response is generated directly (CSV export or SQL display)
+1. **SlackService.handle_button_action()** receives the action with `action_id` UUID
+2. `ConversationRepository.get_turn_by_action_id()` looks up the turn
+3. SQL is retrieved from the `ConversationTurn.sql_query` field
+4. For **Show SQL**: Returns SQL in a code block (no re-execution)
+5. For **Export CSV**: Re-executes SQL via AnalyticsRepository, generates CSV file
+
+The `action_id` UUID provides precise lookup without relying on thread context or query hashes.
 
 ## Routing Logic
 
@@ -298,8 +322,11 @@ async with get_db_context() as db:
     # response.slack_blocks - Slack Block Kit blocks
     # response.intent - Classified intent
     # response.conversation_history - Updated history
+    # response.generated_sql - SQL query (if generated)
+    # response.action_id - UUID for button lookups
     # response.csv_content - CSV data (if export)
     # response.csv_filename - CSV filename (if export)
+    # response.csv_title - Title for CSV file (if export)
 ```
 
 ### SlackService
@@ -308,34 +335,41 @@ Handles Slack-specific operations with conversation persistence:
 
 ```python
 # Full flow for user messages
-async def generate_analytics_response(channel_id, thread_ts, user_id, text):
+async def generate_analytics_response(message, user_id, channel_id, thread_ts):
     # 1. Load conversation history from DB
     turns = await ConversationRepository.get_recent_turns(db, thread_ts, limit=5)
     history = turns_to_history(turns)
 
     # 2. Run analytics chatbot
     response = await analytics_service.run(
-        user_query=text,
+        user_query=message,
         thread_id=thread_ts,
         conversation_history=history,
         ...
     )
 
-    # 3. Save turn to DB
+    # 3. Save turn to DB (with action_id for button lookups)
     await ConversationRepository.add_turn(
-        db, thread_ts, text, response.text,
-        response.intent, response.generated_sql
+        db, thread_ts, message, response.text,
+        response.intent, response.generated_sql, response.action_id
     )
 
     return response
 
-# Button click handling
-async def handle_button_action(action_id, value, thread_ts):
-    # Retrieves SQL from conversation_turns, re-executes, returns result
+# Button click handling (uses action_id UUID for lookup)
+async def handle_button_action(action_id, value, user_id, channel_id, thread_ts):
+    # 1. Look up turn by action_id UUID
+    turn = await ConversationRepository.get_turn_by_action_id(db, action_id)
+    # 2. For show_sql: return SQL in code block
+    # 3. For export_csv: re-execute SQL and generate CSV
 ```
 
 Additional methods:
+- `send_message()`: Post message with automatic truncation for Slack limits
 - `upload_file()`: Upload CSV exports to Slack
+- `verify_request()`: HMAC-SHA256 signature verification
+- `process_message()`: Background task for message processing
+- `process_button_click()`: Background task for button clicks
 
 ## Observability
 

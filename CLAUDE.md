@@ -12,6 +12,8 @@
 # Using Make (from project root)
 make run              # Start dev server (with hot reload)
 make test             # Run tests
+make evals            # Run generic agent evaluations
+make evals-analytics  # Run analytics chatbot evaluations (full)
 make lint             # Check code quality
 make format           # Auto-format code
 make db-init          # Initialize database (start + migrate)
@@ -41,9 +43,9 @@ make docker-up        # Start all backend services
 ├── app/
 │   ├── api/routes/           # HTTP endpoints (health.py, slack.py)
 │   ├── services/             # Business logic (agent.py, slack.py)
-│   ├── repositories/         # Data access (checkpoint.py)
+│   ├── repositories/         # Data access (checkpoint.py, conversation.py, analytics.py)
 │   ├── schemas/              # Pydantic models
-│   ├── db/models/            # Database models (checkpoint.py)
+│   ├── db/models/            # Database models (checkpoint.py, conversation.py)
 │   ├── core/                 # Config, middleware, logging
 │   ├── agents/               # AI agents
 │   │   ├── checkpointer.py   # PostgresCheckpointer
@@ -111,14 +113,16 @@ async with get_db_context() as db:
     # response.text - Response text
     # response.slack_blocks - Slack Block Kit blocks
     # response.intent - Classified intent
+    # response.generated_sql - SQL query (if generated)
+    # response.action_id - UUID for button lookups
 ```
 
 **Features:**
 - Intent routing (analytics, follow-up, export, show SQL, off-topic)
-- Natural language to SQL conversion
-- Result caching for cost optimization
-- Slack Block Kit formatting with action buttons
+- Natural language to SQL conversion with retry on execution errors
+- Slack Block Kit formatting with action buttons (UUID-based lookups)
 - CSV export and SQL retrieval without LLM calls
+- Message truncation for Slack API limits
 
 **Documentation:** `docs/agent_architecture.md`
 
