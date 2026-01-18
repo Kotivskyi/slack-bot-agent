@@ -1,29 +1,35 @@
-"""Agent evaluation framework using pydantic-evals.
+"""Analytics chatbot evaluation framework using pydantic-evals.
 
-Provides tools for evaluating agent responses against defined metrics.
+Provides tools for evaluating analytics chatbot responses against defined metrics.
 
 Usage:
-    uv run python -m evals.main              # Full evaluation
-    uv run python -m evals.main --quick      # Quick evaluation
+    uv run python -m evals.main              # Full evaluation (18 cases)
+    uv run python -m evals.main --quick      # Quick evaluation (3 cases)
 """
 
-from evals.dataset import create_dataset, create_quick_dataset
+from evals.analytics_dataset import create_analytics_dataset, create_quick_analytics_dataset
 from evals.evaluator import (
-    ContainsExpected,
-    ToolsUsed,
-    create_accuracy_judge,
-    create_helpfulness_judge,
+    CSVExport,
+    IntentMatch,
+    ResponseContains,
+    ResponseFormatMatch,
+    SQLContains,
+    SQLGenerated,
+    create_analytics_judge,
 )
-from evals.schemas import AgentInput, AgentOutput, ExpectedOutput
+from evals.schemas import AnalyticsExpected, AnalyticsInput, AnalyticsOutput
 
 __all__ = [
-    "AgentInput",
-    "AgentOutput",
-    "ContainsExpected",
-    "ExpectedOutput",
-    "ToolsUsed",
-    "create_accuracy_judge",
-    "create_dataset",
-    "create_helpfulness_judge",
-    "create_quick_dataset",
+    "AnalyticsExpected",
+    "AnalyticsInput",
+    "AnalyticsOutput",
+    "CSVExport",
+    "IntentMatch",
+    "ResponseContains",
+    "ResponseFormatMatch",
+    "SQLContains",
+    "SQLGenerated",
+    "create_analytics_dataset",
+    "create_analytics_judge",
+    "create_quick_analytics_dataset",
 ]

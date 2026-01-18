@@ -1,24 +1,10 @@
 """AI Agents module using LangGraph.
 
-This module contains a ReAct agent built with LangGraph.
-The assistant subpackage contains the refactored agent implementation.
+This module contains the analytics chatbot built with LangGraph.
 """
 
-from app.agents.assistant import (
-    DEFAULT_SYSTEM_PROMPT,
-    AgentContext,
-    AgentState,
-    build_assistant_graph,
-)
-
-# Legacy imports for backwards compatibility (deprecated)
-from app.agents.langgraph_assistant import LangGraphAssistant, get_agent
+from app.agents.analytics_chatbot import AnalyticsChatbot
 
 __all__ = [
-    "DEFAULT_SYSTEM_PROMPT",
-    "AgentContext",
-    "AgentState",
-    "LangGraphAssistant",
-    "build_assistant_graph",
-    "get_agent",
+    "AnalyticsChatbot",
 ]

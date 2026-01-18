@@ -1,4 +1,4 @@
-.PHONY: install format lint test evals evals-analytics evals-analytics-quick run clean help db-init db-seed
+.PHONY: install format lint test evals evals-quick run clean help db-init db-seed
 
 # === Setup ===
 install:
@@ -39,11 +39,8 @@ test-cov:
 evals:
 	uv run python -m evals.main
 
-evals-analytics:
-	uv run python -m evals.main --analytics
-
-evals-analytics-quick:
-	uv run python -m evals.main --analytics --quick
+evals-quick:
+	uv run python -m evals.main --quick
 
 # === Database ===
 db-init: docker-db
@@ -150,13 +147,12 @@ help:
 	@echo "  make install       Install dependencies + pre-commit hooks"
 	@echo ""
 	@echo "Development:"
-	@echo "  make run                  Start dev server (with hot reload)"
-	@echo "  make test                 Run tests"
-	@echo "  make evals                Run generic agent evaluations"
-	@echo "  make evals-analytics      Run analytics chatbot evaluations"
-	@echo "  make evals-analytics-quick Quick analytics evals (3 cases)"
-	@echo "  make lint                 Check code quality"
-	@echo "  make format               Auto-format code"
+	@echo "  make run           Start dev server (with hot reload)"
+	@echo "  make test          Run tests"
+	@echo "  make evals         Run analytics chatbot evaluations (18 cases)"
+	@echo "  make evals-quick   Quick evaluation (3 cases)"
+	@echo "  make lint          Check code quality"
+	@echo "  make format        Auto-format code"
 	@echo ""
 	@echo "Database:"
 	@echo "  make db-init       Initialize database (start + migrate)"

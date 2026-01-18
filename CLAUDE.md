@@ -12,8 +12,8 @@
 # Using Make (from project root)
 make run              # Start dev server (with hot reload)
 make test             # Run tests
-make evals            # Run generic agent evaluations
-make evals-analytics  # Run analytics chatbot evaluations (full)
+make evals            # Run analytics chatbot evaluations (18 cases)
+make evals-quick      # Quick evaluation (3 cases)
 make lint             # Check code quality
 make format           # Auto-format code
 make db-init          # Initialize database (start + migrate)
@@ -49,17 +49,16 @@ make docker-up        # Start all backend services
 │   ├── core/                 # Config, middleware, logging
 │   ├── agents/               # AI agents
 │   │   ├── checkpointer.py   # PostgresCheckpointer
-│   │   ├── assistant/        # Generic agent (ReAct pattern)
 │   │   └── analytics_chatbot/# Analytics SQL chatbot
 │   │       ├── graph.py      # LangGraph workflow
-│   │       ├── state.py      # ChatbotState, CacheEntry
+│   │       ├── state.py      # ChatbotState
 │   │       ├── prompts.py    # LLM prompts
 │   │       ├── routing.py    # Conditional routing
 │   │       └── nodes/        # Node implementations
 │   └── commands/             # CLI commands
 ├── evals/                    # Agent evaluation (pydantic-evals)
 │   ├── main.py               # CLI: uv run python -m evals.main
-│   ├── dataset.py            # Test cases
+│   ├── analytics_dataset.py  # Test cases (18 cases)
 │   └── evaluator.py          # Custom evaluators
 ├── tests/                    # pytest test suite
 └── alembic/                  # Database migrations

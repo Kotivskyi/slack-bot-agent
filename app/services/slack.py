@@ -253,46 +253,6 @@ class SlackService:
             logger.error(f"File upload failed: {e}")
             raise e
 
-    async def generate_ai_response(
-        self,
-        message: str,
-        user_id: str,
-        thread_ts: str | None = None,
-    ) -> str:
-        """Generate AI response using LangGraph agent.
-
-        Args:
-            message: The user's message.
-            user_id: The Slack user ID.
-            thread_ts: Optional thread timestamp for conversation continuity.
-
-        Returns:
-            Generated AI response.
-        """
-        from app.agents import AgentContext
-        from app.services.agent import AgentService
-
-        # Thread ID for conversation continuity
-        thread_id = f"slack_thread_{thread_ts}" if thread_ts else f"slack_user_{user_id}"
-
-        context: AgentContext = {
-            "user_id": user_id,
-            "metadata": {"source": "slack"},
-        }
-
-        try:
-            agent_service = AgentService()
-            output, _ = await agent_service.run(
-                user_input=message,
-                thread_id=thread_id,
-                history=[],
-                context=context,
-            )
-            return output or "I couldn't generate a response."
-        except Exception:
-            logger.exception(f"Error generating AI response for user {user_id}")
-            return "Sorry, I encountered an error. Please try again."
-
     async def generate_analytics_response(
         self,
         message: str,
