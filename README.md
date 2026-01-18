@@ -401,6 +401,17 @@ For detailed documentation, see the `docs/` folder:
 - **[Database Patterns](docs/database_skill.md)** - Repository and service patterns
 - **[Testing Guide](docs/testing.md)** - Testing best practices
 
+## Pre-Production Checklist
+
+**Security (done):** Read-only DB, SQL allowlisting, Slack signature verification (HMAC-SHA256)
+
+**P0 — Must Have:**
+- SQL runtime validation
+- User permissions management
+- Cost alerts (AWS + LLM)
+
+See [Future Improvements](docs/Future%20Improvements.md) for the full roadmap.
+
 ## Troubleshooting
 
 ### Slack not receiving events
