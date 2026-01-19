@@ -4,10 +4,12 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
+
+from app.services.slack import SlackService
 
 
 def generate_slack_signature(body: str, timestamp: str, signing_secret: str) -> str:
@@ -35,34 +37,34 @@ def slack_timestamp() -> str:
 
 @pytest.mark.anyio
 async def test_url_verification(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test Slack URL verification challenge."""
     body = json.dumps({"type": "url_verification", "challenge": "test-challenge-123"})
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with patch("app.services.slack.settings") as mock_settings:
-        mock_settings.SLACK_BOT_TOKEN = "xoxb-test"
-        mock_settings.SLACK_SIGNING_SECRET = slack_signing_secret
-
-        # Need to reload the service to pick up mocked settings
-        with patch("app.services.slack.slack_service.signing_secret", slack_signing_secret):
-            response = await client.post(
-                "/slack/events",
-                content=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Slack-Request-Timestamp": slack_timestamp,
-                    "X-Slack-Signature": signature,
-                },
-            )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
     assert response.status_code == 200
     assert response.json() == {"challenge": "test-challenge-123"}
 
 
 @pytest.mark.anyio
-async def test_invalid_signature_rejected(client: AsyncClient, slack_timestamp: str):
+async def test_invalid_signature_rejected(
+    client: AsyncClient,
+    slack_timestamp: str,
+):
     """Test that invalid signatures are rejected."""
     body = json.dumps({"type": "url_verification", "challenge": "test"})
 
@@ -81,29 +83,34 @@ async def test_invalid_signature_rejected(client: AsyncClient, slack_timestamp: 
 
 
 @pytest.mark.anyio
-async def test_old_timestamp_rejected(client: AsyncClient, slack_signing_secret: str):
+async def test_old_timestamp_rejected(
+    client: AsyncClient,
+    slack_signing_secret: str,
+):
     """Test that requests with old timestamps are rejected."""
     old_timestamp = str(int(time.time()) - 600)  # 10 minutes ago
     body = json.dumps({"type": "url_verification", "challenge": "test"})
     signature = generate_slack_signature(body, old_timestamp, slack_signing_secret)
 
-    with patch("app.services.slack.slack_service.signing_secret", slack_signing_secret):
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": old_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": old_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
     assert response.status_code == 401
 
 
 @pytest.mark.anyio
 async def test_direct_message_triggers_response(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that direct messages trigger analytics response."""
     body = json.dumps(
@@ -121,48 +128,47 @@ async def test_direct_message_triggers_response(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch(
-            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
-        ) as mock_generate,
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        mock_generate.return_value = {
+    # Mock the service methods on the instance
+    mock_slack_service.generate_analytics_response = AsyncMock(
+        return_value={
             "text": "AI response to: Hello bot!",
             "blocks": None,
             "intent": "off_topic",
         }
-        mock_send.return_value = {"ok": True}
+    )
+    mock_slack_service.send_message = AsyncMock(return_value={"ok": True})
 
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
-        assert response.status_code == 200
-        mock_generate.assert_called_once_with(
-            message="Hello bot!",
-            user_id="U123456",
-            channel_id="D123456",
-            thread_ts="1234567890.123456",
-        )
-        mock_send.assert_called_once_with(
-            channel="D123456",
-            text="AI response to: Hello bot!",
-            thread_ts="1234567890.123456",
-            blocks=None,
-        )
+    assert response.status_code == 200
+    mock_slack_service.generate_analytics_response.assert_called_once_with(
+        message="Hello bot!",
+        user_id="U123456",
+        channel_id="D123456",
+        thread_ts="1234567890.123456",
+    )
+    mock_slack_service.send_message.assert_called_once_with(
+        channel="D123456",
+        text="AI response to: Hello bot!",
+        thread_ts="1234567890.123456",
+        blocks=None,
+    )
 
 
 @pytest.mark.anyio
 async def test_channel_message_ignored(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that regular channel messages (not mentions) are ignored."""
     body = json.dumps(
@@ -180,27 +186,28 @@ async def test_channel_message_ignored(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    mock_slack_service.send_message = AsyncMock()
 
-        assert response.status_code == 200
-        mock_send.assert_not_called()
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
+
+    assert response.status_code == 200
+    mock_slack_service.send_message.assert_not_called()
 
 
 @pytest.mark.anyio
 async def test_bot_message_ignored(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that bot messages are ignored to prevent loops."""
     body = json.dumps(
@@ -217,27 +224,28 @@ async def test_bot_message_ignored(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    mock_slack_service.send_message = AsyncMock()
 
-        assert response.status_code == 200
-        mock_send.assert_not_called()
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
+
+    assert response.status_code == 200
+    mock_slack_service.send_message.assert_not_called()
 
 
 @pytest.mark.anyio
 async def test_app_mention_event(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that app_mention events are handled."""
     body = json.dumps(
@@ -254,43 +262,41 @@ async def test_app_mention_event(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch(
-            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
-        ) as mock_generate,
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        mock_generate.return_value = {
+    mock_slack_service.generate_analytics_response = AsyncMock(
+        return_value={
             "text": "AI response",
             "blocks": None,
             "intent": "off_topic",
         }
-        mock_send.return_value = {"ok": True}
+    )
+    mock_slack_service.send_message = AsyncMock(return_value={"ok": True})
 
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
-        assert response.status_code == 200
-        mock_generate.assert_called_once_with(
-            message="<@U987654> help me",
-            user_id="U123456",
-            channel_id="C123456",
-            thread_ts="1234567890.123456",
-        )
-        mock_send.assert_called_once()
+    assert response.status_code == 200
+    mock_slack_service.generate_analytics_response.assert_called_once_with(
+        message="<@U987654> help me",
+        user_id="U123456",
+        channel_id="C123456",
+        thread_ts="1234567890.123456",
+    )
+    mock_slack_service.send_message.assert_called_once()
 
 
 @pytest.mark.anyio
 async def test_thread_reply_uses_thread_ts_for_conversation_continuity(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that replies in a thread use thread_ts (not ts) for thread_id.
 
@@ -322,51 +328,49 @@ async def test_thread_reply_uses_thread_ts_for_conversation_continuity(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch(
-            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
-        ) as mock_generate,
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        mock_generate.return_value = {
+    mock_slack_service.generate_analytics_response = AsyncMock(
+        return_value={
             "text": "AI response",
             "blocks": None,
             "intent": "follow_up",
         }
-        mock_send.return_value = {"ok": True}
+    )
+    mock_slack_service.send_message = AsyncMock(return_value={"ok": True})
 
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
-        assert response.status_code == 200
-        # CRITICAL: thread_ts should be the thread root, NOT the reply's ts
-        # This ensures conversation history is loaded correctly
-        mock_generate.assert_called_once_with(
-            message="<@U987654> follow up question",
-            user_id="U123456",
-            channel_id="C123456",
-            thread_ts=thread_root_ts,  # Must use thread root, not reply ts
-        )
-        # Response should also go to thread root
-        mock_send.assert_called_once_with(
-            channel="C123456",
-            text="AI response",
-            thread_ts=thread_root_ts,
-            blocks=None,
-        )
+    assert response.status_code == 200
+    # CRITICAL: thread_ts should be the thread root, NOT the reply's ts
+    # This ensures conversation history is loaded correctly
+    mock_slack_service.generate_analytics_response.assert_called_once_with(
+        message="<@U987654> follow up question",
+        user_id="U123456",
+        channel_id="C123456",
+        thread_ts=thread_root_ts,  # Must use thread root, not reply ts
+    )
+    # Response should also go to thread root
+    mock_slack_service.send_message.assert_called_once_with(
+        channel="C123456",
+        text="AI response",
+        thread_ts=thread_root_ts,
+        blocks=None,
+    )
 
 
 @pytest.mark.anyio
 async def test_standalone_message_uses_ts_when_no_thread(
-    client: AsyncClient, slack_signing_secret: str, slack_timestamp: str
+    client: AsyncClient,
+    mock_slack_service: SlackService,
+    slack_signing_secret: str,
+    slack_timestamp: str,
 ):
     """Test that standalone messages (not in a thread) use ts as thread_id.
 
@@ -391,41 +395,36 @@ async def test_standalone_message_uses_ts_when_no_thread(
     )
     signature = generate_slack_signature(body, slack_timestamp, slack_signing_secret)
 
-    with (
-        patch("app.services.slack.slack_service.signing_secret", slack_signing_secret),
-        patch(
-            "app.services.slack.slack_service.generate_analytics_response", new_callable=AsyncMock
-        ) as mock_generate,
-        patch("app.services.slack.slack_service.send_message", new_callable=AsyncMock) as mock_send,
-    ):
-        mock_generate.return_value = {
+    mock_slack_service.generate_analytics_response = AsyncMock(
+        return_value={
             "text": "AI response",
             "blocks": None,
             "intent": "analytics_query",
         }
-        mock_send.return_value = {"ok": True}
+    )
+    mock_slack_service.send_message = AsyncMock(return_value={"ok": True})
 
-        response = await client.post(
-            "/slack/events",
-            content=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-Slack-Request-Timestamp": slack_timestamp,
-                "X-Slack-Signature": signature,
-            },
-        )
+    response = await client.post(
+        "/slack/events",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Slack-Request-Timestamp": slack_timestamp,
+            "X-Slack-Signature": signature,
+        },
+    )
 
-        assert response.status_code == 200
-        # When no thread_ts, use ts as the thread identifier
-        mock_generate.assert_called_once_with(
-            message="New question",
-            user_id="U123456",
-            channel_id="D123456",
-            thread_ts=message_ts,  # Falls back to ts when no thread_ts
-        )
-        mock_send.assert_called_once_with(
-            channel="D123456",
-            text="AI response",
-            thread_ts=message_ts,
-            blocks=None,
-        )
+    assert response.status_code == 200
+    # When no thread_ts, use ts as the thread identifier
+    mock_slack_service.generate_analytics_response.assert_called_once_with(
+        message="New question",
+        user_id="U123456",
+        channel_id="D123456",
+        thread_ts=message_ts,  # Falls back to ts when no thread_ts
+    )
+    mock_slack_service.send_message.assert_called_once_with(
+        channel="D123456",
+        text="AI response",
+        thread_ts=message_ts,
+        blocks=None,
+    )

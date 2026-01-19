@@ -10,8 +10,6 @@ from typing import Any
 from slack_sdk.errors import SlackApiError
 from slack_sdk.web.async_client import AsyncWebClient
 
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 # Slack API limits
@@ -119,11 +117,25 @@ def _prepare_blocks_for_slack(blocks: list[dict] | None) -> list[dict] | None:
 
 
 class SlackService:
-    """Service for Slack-related operations."""
+    """Service for Slack-related operations.
 
-    def __init__(self) -> None:
-        self.client = AsyncWebClient(token=settings.SLACK_BOT_TOKEN)
-        self.signing_secret = settings.SLACK_SIGNING_SECRET
+    Dependencies are injected via constructor for testability and flexibility.
+    Use app.api.deps.get_slack_service() for FastAPI dependency injection.
+    """
+
+    def __init__(
+        self,
+        slack_client: AsyncWebClient,
+        signing_secret: str,
+    ) -> None:
+        """Initialize the Slack service.
+
+        Args:
+            slack_client: Async Slack web client for API calls.
+            signing_secret: Slack signing secret for request verification.
+        """
+        self.client = slack_client
+        self.signing_secret = signing_secret
 
     def verify_request(
         self,
@@ -271,6 +283,7 @@ class SlackService:
         Returns:
             Dict with text, blocks, and any file upload info.
         """
+        from app.api.deps import get_llm_client
         from app.db.session import get_analytics_db_context, get_db_context
         from app.repositories import ConversationRepository, turns_to_history
         from app.services.agent import AnalyticsAgentService
@@ -287,7 +300,11 @@ class SlackService:
 
             # 2. Run analytics agent
             async with get_analytics_db_context() as analytics_db:
-                analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
+                llm_client = get_llm_client()
+                analytics_service = AnalyticsAgentService(
+                    analytics_db=analytics_db,
+                    llm_client=llm_client,
+                )
                 response = await analytics_service.run(
                     user_query=message,
                     thread_id=thread_id,
@@ -776,7 +793,3 @@ class SlackService:
             )
         except Exception:
             logger.exception("Failed to send error message")
-
-
-# Service instance
-slack_service = SlackService()

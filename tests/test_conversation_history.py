@@ -326,15 +326,10 @@ class TestHistoryPreservation:
 class TestIntentRouterUsesHistory:
     """Test that intent router properly uses conversation history."""
 
-    @patch("app.agents.analytics_chatbot.nodes.intent_router.ChatOpenAI")
     @patch("app.agents.analytics_chatbot.nodes.intent_router.INTENT_CLASSIFIER_PROMPT")
-    def test_intent_router_formats_history_for_llm(self, mock_prompt, mock_llm_class):
+    def test_intent_router_formats_history_for_llm(self, mock_prompt):
         """Intent router should format conversation history for LLM classification."""
         from app.agents.analytics_chatbot.nodes.intent_router import classify_intent
-
-        # Mock LLM and chain
-        mock_llm = MagicMock()
-        mock_llm_class.return_value = mock_llm
 
         # Create a mock response with proper content attribute
         mock_response = MagicMock()
@@ -361,7 +356,10 @@ class TestIntentRouterUsesHistory:
             ],
         }
 
-        classify_intent(state)
+        # Create mock LLM and pass via config
+        mock_llm = MagicMock()
+        config = {"configurable": {"thread_id": "test-thread", "llm_client": mock_llm}}
+        classify_intent(state, config)
 
         # Verify history was passed to LLM
         assert "history" in captured_input
@@ -378,7 +376,9 @@ class TestIntentRouterUsesHistory:
             "conversation_history": [],
         }
 
-        result = classify_intent(state)
+        # Pass config with configurable (required by updated function signature)
+        config = {"configurable": {"thread_id": "test-thread"}}
+        result = classify_intent(state, config)
 
         assert result["intent"] == "export_csv"
         assert result["confidence"] == 0.95

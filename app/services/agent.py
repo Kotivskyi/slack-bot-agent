@@ -5,14 +5,12 @@ Provides a high-level interface for running the analytics chatbot.
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
 
+from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analytics_chatbot import AnalyticsChatbot
-
-if TYPE_CHECKING:
-    from app.repositories import AnalyticsRepository
+from app.repositories import AnalyticsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +48,14 @@ class AnalyticsAgentService:
     Provides a high-level interface for running the analytics chatbot
     with SQL generation, caching, and Slack Block Kit formatting.
 
+    All dependencies are injected via constructor.
+
     Usage:
-        analytics_service = AnalyticsAgentService(analytics_db=analytics_db)
+        analytics_service = AnalyticsAgentService(
+            analytics_db=analytics_db,
+            analytics_repo=AnalyticsRepository(),
+            llm_client=llm_client,
+        )
         response = await analytics_service.run(
             user_query="How many apps do we have?",
             thread_id="thread-123",
@@ -63,28 +67,20 @@ class AnalyticsAgentService:
     def __init__(
         self,
         analytics_db: AsyncSession,
+        llm_client: ChatOpenAI,
+        analytics_repo: AnalyticsRepository | None = None,
     ):
         """Initialize the analytics agent service.
 
         Args:
             analytics_db: Database session for analytics SQL queries (read-only).
+            llm_client: LLM client for all LLM operations.
+            analytics_repo: Repository for analytics queries. Defaults to new instance.
         """
         self._analytics_db = analytics_db
-        self._analytics_repository: AnalyticsRepository | None = None
+        self._analytics_repo = analytics_repo or AnalyticsRepository()
+        self._llm_client = llm_client
         self._chatbot: AnalyticsChatbot | None = None
-
-    @property
-    def analytics_repository(self) -> "AnalyticsRepository":
-        """Get or create the AnalyticsRepository instance.
-
-        Pattern 1: Repository created without session.
-        Session is passed to methods at call time.
-        """
-        if self._analytics_repository is None:
-            from app.repositories import AnalyticsRepository
-
-            self._analytics_repository = AnalyticsRepository()
-        return self._analytics_repository
 
     @property
     def chatbot(self) -> AnalyticsChatbot:
@@ -92,7 +88,8 @@ class AnalyticsAgentService:
         if self._chatbot is None:
             self._chatbot = AnalyticsChatbot(
                 db=self._analytics_db,
-                repository=self.analytics_repository,
+                repository=self._analytics_repo,
+                llm_client=self._llm_client,
             )
         return self._chatbot
 

@@ -7,16 +7,15 @@ import logging
 from typing import Any
 
 import logfire
-from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
 
 from app.agents.analytics_chatbot.prompts import INTERPRETER_PROMPT
 from app.agents.analytics_chatbot.state import ChatbotState
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def interpret_results(state: ChatbotState) -> dict[str, Any]:
+def interpret_results(state: ChatbotState, config: RunnableConfig) -> dict[str, Any]:
     """Interpret query results and decide presentation format.
 
     Determines if results should be shown as simple text or table format
@@ -24,6 +23,7 @@ def interpret_results(state: ChatbotState) -> dict[str, Any]:
 
     Args:
         state: Current chatbot state with query_results, column_names, and row_count.
+        config: RunnableConfig with llm_client in configurable.
 
     Returns:
         Dict with response_format and response_text fields.
@@ -56,11 +56,7 @@ def interpret_results(state: ChatbotState) -> dict[str, Any]:
         sample_data = results[:5] if results else []
 
         with logfire.span("llm_interpretation"):
-            llm = ChatOpenAI(
-                model=settings.AI_MODEL,
-                temperature=0.3,  # Slightly more creative for interpretations
-                api_key=settings.OPENAI_API_KEY,
-            )
+            llm = config.get("configurable", {}).get("llm_client")
             chain = INTERPRETER_PROMPT | llm
             response = chain.invoke(
                 {

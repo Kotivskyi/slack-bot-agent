@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from slack_sdk.web.async_client import AsyncWebClient
 
 from app.services.slack import (
     SLACK_MAX_BLOCK_TEXT_LENGTH,
@@ -14,16 +15,25 @@ from app.services.slack import (
 )
 
 
+@pytest.fixture
+def mock_slack_client() -> MagicMock:
+    """Create a mock Slack client for testing."""
+    mock = MagicMock(spec=AsyncWebClient)
+    mock.chat_postMessage = AsyncMock(return_value=MagicMock(data={"ok": True}))
+    mock.files_upload_v2 = AsyncMock(return_value=MagicMock(data={"ok": True}))
+    return mock
+
+
 class TestHandleButtonAction:
     """Tests for handle_button_action method using action_id lookups."""
 
     @pytest.fixture
-    def slack_service(self):
+    def slack_service(self, mock_slack_client):
         """Create a SlackService instance."""
-        with patch("app.services.slack.settings") as mock_settings:
-            mock_settings.SLACK_BOT_TOKEN = "xoxb-test"
-            mock_settings.SLACK_SIGNING_SECRET = "test-secret"
-            return SlackService()
+        return SlackService(
+            slack_client=mock_slack_client,
+            signing_secret="test-secret",
+        )
 
     @pytest.mark.anyio
     async def test_show_sql_action_id_lookup(self, slack_service):
@@ -231,12 +241,12 @@ class TestGenerateAnalyticsResponseSavesActionId:
     """Tests for generate_analytics_response saving action_id."""
 
     @pytest.fixture
-    def slack_service(self):
+    def slack_service(self, mock_slack_client):
         """Create a SlackService instance."""
-        with patch("app.services.slack.settings") as mock_settings:
-            mock_settings.SLACK_BOT_TOKEN = "xoxb-test"
-            mock_settings.SLACK_SIGNING_SECRET = "test-secret"
-            return SlackService()
+        return SlackService(
+            slack_client=mock_slack_client,
+            signing_secret="test-secret",
+        )
 
     @pytest.mark.anyio
     async def test_saves_action_id_from_response(self, slack_service):
@@ -410,12 +420,12 @@ class TestSendMessageTruncation:
     """Tests for send_message truncation behavior."""
 
     @pytest.fixture
-    def slack_service(self):
+    def slack_service(self, mock_slack_client):
         """Create a SlackService instance."""
-        with patch("app.services.slack.settings") as mock_settings:
-            mock_settings.SLACK_BOT_TOKEN = "xoxb-test"
-            mock_settings.SLACK_SIGNING_SECRET = "test-secret"
-            return SlackService()
+        return SlackService(
+            slack_client=mock_slack_client,
+            signing_secret="test-secret",
+        )
 
     @pytest.mark.anyio
     async def test_send_message_truncates_long_blocks(self, slack_service):

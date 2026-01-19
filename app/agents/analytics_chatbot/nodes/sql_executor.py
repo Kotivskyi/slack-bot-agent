@@ -6,38 +6,44 @@ No LLM calls - pure database operations via repository.
 
 import hashlib
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import logfire
+from langchain_core.runnables import RunnableConfig
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analytics_chatbot.state import ChatbotState
-
-if TYPE_CHECKING:
-    from app.repositories import AnalyticsRepository
+from app.repositories import AnalyticsRepository
 
 logger = logging.getLogger(__name__)
 
 
 async def execute_sql(
     state: ChatbotState,
-    db: AsyncSession,
-    repository: "AnalyticsRepository",
+    config: RunnableConfig,
 ) -> dict[str, Any]:
     """Execute SQL query and return results.
 
     On success, returns results with sql_error=None.
     On failure, returns sql_error for retry routing.
 
+    Dependencies are read from config["configurable"]:
+    - analytics_db: Database session for query execution.
+    - analytics_repo: Analytics repository for query execution.
+
     Args:
         state: Current chatbot state with generated_sql.
-        db: Database session for query execution.
-        repository: Analytics repository for query execution.
+        config: RunnableConfig with configurable dependencies.
 
     Returns:
         Dict with query_results, row_count, column_names, current_query_id,
         and sql_error (None on success, error message on failure).
     """
+    # Get dependencies from config
+    configurable = config.get("configurable", {})
+    db: AsyncSession = configurable["analytics_db"]
+    repository: AnalyticsRepository = configurable["analytics_repo"]
+
     sql = state.get("generated_sql", "")
     sql_hash = hashlib.md5(sql.encode()).hexdigest()[:8]
 

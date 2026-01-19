@@ -7,13 +7,15 @@ See: https://anyio.readthedocs.io/en/stable/testing.html
 # ruff: noqa: I001 - Imports structured for Jinja2 template conditionals
 
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from slack_sdk.web.async_client import AsyncWebClient
 
+from app.api.deps import get_db_session, get_slack_service
 from app.main import app
-from app.api.deps import get_db_session
+from app.services.slack import SlackService
 
 
 @pytest.fixture
@@ -37,8 +39,27 @@ async def mock_db_session() -> AsyncGenerator[AsyncMock, None]:
 
 
 @pytest.fixture
+def mock_slack_client() -> MagicMock:
+    """Create a mock Slack client for testing."""
+    mock = MagicMock(spec=AsyncWebClient)
+    mock.chat_postMessage = AsyncMock(return_value=MagicMock(data={"ok": True}))
+    mock.files_upload_v2 = AsyncMock(return_value=MagicMock(data={"ok": True}))
+    return mock
+
+
+@pytest.fixture
+def mock_slack_service(mock_slack_client: MagicMock) -> SlackService:
+    """Create a SlackService with a mock client for testing."""
+    return SlackService(
+        slack_client=mock_slack_client,
+        signing_secret="test-signing-secret",
+    )
+
+
+@pytest.fixture
 async def client(
     mock_db_session,
+    mock_slack_service,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client for testing.
 
@@ -47,6 +68,7 @@ async def client(
     """
     # Override dependencies for testing
     app.dependency_overrides[get_db_session] = lambda: mock_db_session
+    app.dependency_overrides[get_slack_service] = lambda: mock_slack_service
 
     async with AsyncClient(
         transport=ASGITransport(app=app),

@@ -9,16 +9,15 @@ import logging
 from typing import Any
 
 import logfire
-from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
 
 from app.agents.analytics_chatbot.prompts import INTENT_CLASSIFIER_PROMPT
 from app.agents.analytics_chatbot.state import ChatbotState
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def classify_intent(state: ChatbotState) -> dict[str, Any]:
+def classify_intent(state: ChatbotState, config: RunnableConfig) -> dict[str, Any]:
     """Route to appropriate pipeline based on user intent.
 
     Uses keyword matching first for common intents (export, SQL),
@@ -26,6 +25,7 @@ def classify_intent(state: ChatbotState) -> dict[str, Any]:
 
     Args:
         state: Current chatbot state with user_query.
+        config: RunnableConfig with llm_client in configurable.
 
     Returns:
         Dict with intent and confidence fields.
@@ -67,11 +67,7 @@ def classify_intent(state: ChatbotState) -> dict[str, Any]:
         )
 
         with logfire.span("llm_intent_classification"):
-            llm = ChatOpenAI(
-                model=settings.AI_MODEL,
-                temperature=0,
-                api_key=settings.OPENAI_API_KEY,
-            )
+            llm = config.get("configurable", {}).get("llm_client")
             chain = INTENT_CLASSIFIER_PROMPT | llm
             response = chain.invoke({"query": state.get("user_query", ""), "history": history_text})
 

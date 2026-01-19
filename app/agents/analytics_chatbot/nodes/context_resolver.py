@@ -9,16 +9,15 @@ import logging
 from typing import Any
 
 import logfire
-from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
 
 from app.agents.analytics_chatbot.prompts import CONTEXT_RESOLVER_PROMPT
 from app.agents.analytics_chatbot.state import ChatbotState
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_context(state: ChatbotState) -> dict[str, Any]:
+def resolve_context(state: ChatbotState, config: RunnableConfig) -> dict[str, Any]:
     """Resolve query context using conversation history.
 
     For all analytics queries (both new and follow-ups), this node:
@@ -28,6 +27,7 @@ def resolve_context(state: ChatbotState) -> dict[str, Any]:
 
     Args:
         state: Current chatbot state with user_query and conversation_history.
+        config: RunnableConfig with llm_client in configurable.
 
     Returns:
         Dict with resolved_query and referenced_query_id fields.
@@ -57,11 +57,7 @@ def resolve_context(state: ChatbotState) -> dict[str, Any]:
         )
 
         with logfire.span("llm_context_resolution"):
-            llm = ChatOpenAI(
-                model=settings.AI_MODEL,
-                temperature=0,
-                api_key=settings.OPENAI_API_KEY,
-            )
+            llm = config.get("configurable", {}).get("llm_client")
             chain = CONTEXT_RESOLVER_PROMPT | llm
             response = chain.invoke(
                 {

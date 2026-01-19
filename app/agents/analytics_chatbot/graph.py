@@ -6,12 +6,18 @@ Defines the complete workflow graph with nodes and edges for:
 - SQL generation and execution with retry
 - Response formatting
 - Button operations (CSV export, SQL retrieval)
+
+Dependencies are passed via config["configurable"] at runtime:
+- analytics_db: AsyncSession for SQL execution
+- analytics_repo: AnalyticsRepository for SQL execution
+- llm_client: ChatOpenAI for LLM calls (optional, falls back to default)
 """
 
 import logging
 from typing import TYPE_CHECKING, Any
 
 import logfire
+from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -38,34 +44,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_executor_node(db: "AsyncSession", repository: "AnalyticsRepository"):
-    """Create executor node with db session and repository bound.
-
-    Args:
-        db: Database session for query execution.
-        repository: Analytics repository for query execution.
-
-    Returns:
-        Async function that executes SQL.
-    """
-
-    async def executor_node(state: ChatbotState) -> dict[str, Any]:
-        return await execute_sql(state, db, repository)
-
-    return executor_node
-
-
-def create_analytics_chatbot(
-    db: "AsyncSession | None" = None,
-    repository: "AnalyticsRepository | None" = None,
-) -> StateGraph:
+def create_analytics_chatbot() -> StateGraph:
     """Create the complete LangGraph workflow for the Slack analytics chatbot.
 
-    Args:
-        db: Optional database session for SQL execution.
-        repository: Optional analytics repository for SQL execution. If both
-            db and repository are provided, SQL execution is enabled.
-            If either is None, a placeholder is used.
+    Dependencies (db, repository, llm) are passed via config["configurable"]
+    at runtime, not at graph creation time.
 
     Returns:
         Uncompiled StateGraph instance.
@@ -75,6 +58,7 @@ def create_analytics_chatbot(
         workflow = StateGraph(ChatbotState)
 
         # ===== Add all nodes =====
+        # All nodes receive dependencies from config["configurable"]
 
         # Entry & routing
         workflow.add_node("intent_router", classify_intent)
@@ -84,23 +68,7 @@ def create_analytics_chatbot(
 
         # SQL pipeline
         workflow.add_node("sql_generator", generate_sql)
-
-        # Executor node - needs both db and repository
-        if db is not None and repository is not None:
-            workflow.add_node("executor", create_executor_node(db, repository))
-        else:
-            # Placeholder that will be replaced at invoke time
-            async def placeholder_executor(state: ChatbotState) -> dict[str, Any]:
-                logfire.error("Executor called without repository")
-                return {
-                    "query_results": None,
-                    "sql_error": "Analytics repository not configured",
-                    "row_count": 0,
-                    "column_names": [],
-                }
-
-            workflow.add_node("executor", placeholder_executor)
-
+        workflow.add_node("executor", execute_sql)
         workflow.add_node("interpreter", interpret_results)
         workflow.add_node("format_response", format_slack_response)
 
@@ -160,58 +128,64 @@ def create_analytics_chatbot(
         return workflow
 
 
-def compile_analytics_chatbot(
-    db: "AsyncSession | None" = None,
-    repository: "AnalyticsRepository | None" = None,
-) -> CompiledStateGraph:
+def compile_analytics_chatbot() -> CompiledStateGraph:
     """Compile the analytics chatbot graph.
-
-    Args:
-        db: Optional database session for SQL execution.
-        repository: Optional analytics repository for SQL execution.
 
     Returns:
         Compiled StateGraph ready for invocation.
     """
     with logfire.span("compile_analytics_chatbot"):
-        workflow = create_analytics_chatbot(db, repository)
+        workflow = create_analytics_chatbot()
         app = workflow.compile()
 
         logfire.info("Analytics chatbot compiled")
         return app
 
 
+# Module-level compiled graph (singleton for efficiency)
+_compiled_graph: CompiledStateGraph | None = None
+
+
+def get_compiled_graph() -> CompiledStateGraph:
+    """Get or create the singleton compiled graph.
+
+    Returns:
+        Compiled StateGraph ready for invocation.
+    """
+    global _compiled_graph
+    if _compiled_graph is None:
+        _compiled_graph = compile_analytics_chatbot()
+    return _compiled_graph
+
+
 class AnalyticsChatbot:
     """High-level wrapper for the analytics chatbot.
 
     Provides a cleaner interface for running the chatbot with proper
-    repository injection and state management.
+    dependency injection via config.
     """
 
     def __init__(
         self,
         db: "AsyncSession",
         repository: "AnalyticsRepository",
+        llm_client: ChatOpenAI,
     ):
         """Initialize the chatbot.
 
         Args:
             db: Database session for SQL execution.
             repository: Analytics repository for SQL execution.
+            llm_client: LLM client for all LLM operations.
         """
         self._db = db
         self._repository = repository
-        self._graph: CompiledStateGraph | None = None
+        self._llm_client = llm_client
 
     @property
     def graph(self) -> CompiledStateGraph:
-        """Lazy-load the compiled graph."""
-        if self._graph is None:
-            self._graph = compile_analytics_chatbot(
-                db=self._db,
-                repository=self._repository,
-            )
-        return self._graph
+        """Get the singleton compiled graph."""
+        return get_compiled_graph()
 
     async def run(
         self,
@@ -253,8 +227,17 @@ class AnalyticsChatbot:
                 "retry_count": 0,
             }
 
+            # Pass dependencies via config["configurable"]
+            config: dict[str, Any] = {
+                "configurable": {
+                    "thread_id": thread_id,
+                    "analytics_db": self._db,
+                    "analytics_repo": self._repository,
+                    "llm_client": self._llm_client,
+                }
+            }
+
             # Run the graph
-            config = {"configurable": {"thread_id": thread_id}}
             result = await self.graph.ainvoke(initial_state, config)
 
             logfire.info(

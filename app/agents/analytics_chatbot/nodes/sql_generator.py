@@ -8,7 +8,7 @@ import logging
 from typing import Any
 
 import logfire
-from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
 
 from app.agents.analytics_chatbot.prompts import (
     DB_SCHEMA,
@@ -17,12 +17,11 @@ from app.agents.analytics_chatbot.prompts import (
     SQL_RETRY_PROMPT,
 )
 from app.agents.analytics_chatbot.state import ChatbotState
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def generate_sql(state: ChatbotState) -> dict[str, Any]:
+def generate_sql(state: ChatbotState, config: RunnableConfig) -> dict[str, Any]:
     """Generate SQL from natural language query.
 
     Uses the resolved query if available (for follow-ups).
@@ -30,6 +29,7 @@ def generate_sql(state: ChatbotState) -> dict[str, Any]:
 
     Args:
         state: Current chatbot state with user_query or resolved_query.
+        config: RunnableConfig with llm_client in configurable.
 
     Returns:
         Dict with generated_sql, assumptions_made, and retry_count fields.
@@ -40,11 +40,7 @@ def generate_sql(state: ChatbotState) -> dict[str, Any]:
     sql_error = state.get("sql_error")
 
     with logfire.span("generate_sql", query=query[:100], retry_count=retry_count):
-        llm = ChatOpenAI(
-            model=settings.AI_MODEL,
-            temperature=0,
-            api_key=settings.OPENAI_API_KEY,
-        )
+        llm = config.get("configurable", {}).get("llm_client")
 
         # Use retry prompt if this is a retry with previous error
         if retry_count > 0 and previous_sql and sql_error:

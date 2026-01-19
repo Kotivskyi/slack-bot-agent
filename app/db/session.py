@@ -73,6 +73,24 @@ async def get_analytics_db_context() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
 
 
+async def get_analytics_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Get read-only database session for FastAPI dependency injection.
+
+    This session:
+    - Uses READ ONLY transaction mode (enforced by PostgreSQL)
+    - Always rolls back (no commits possible)
+    - Is isolated from the main app session (separate transaction)
+
+    Use with FastAPI Depends() for analytics query routes.
+    """
+    async with async_session_maker() as session:
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        try:
+            yield session
+        finally:
+            await session.rollback()
+
+
 async def close_db() -> None:
     """Close database connections."""
     await engine.dispose()

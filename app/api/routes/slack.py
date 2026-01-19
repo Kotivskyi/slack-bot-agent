@@ -6,8 +6,8 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request, Response
 
+from app.api.deps import SlackServiceDep
 from app.schemas.slack import SlackEventWrapper
-from app.services.slack import slack_service
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ router = APIRouter()
 async def slack_events(
     request: Request,
     background_tasks: BackgroundTasks,
+    slack_service: SlackServiceDep,
     x_slack_request_timestamp: str = Header(..., alias="X-Slack-Request-Timestamp"),
     x_slack_signature: str = Header(..., alias="X-Slack-Signature"),
 ) -> Response | dict:
@@ -80,6 +81,7 @@ async def slack_events(
 async def slack_interactions(
     request: Request,
     background_tasks: BackgroundTasks,
+    slack_service: SlackServiceDep,
     x_slack_request_timestamp: str = Header(..., alias="X-Slack-Request-Timestamp"),
     x_slack_signature: str = Header(..., alias="X-Slack-Signature"),
 ) -> Response:
