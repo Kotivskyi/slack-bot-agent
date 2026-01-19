@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_analytics_db_session, get_db_session
+from app.services.llm import get_llm_client
 
 if TYPE_CHECKING:
     from app.services.slack import SlackService
@@ -31,17 +32,6 @@ def get_slack_client() -> AsyncWebClient:
 
 
 SlackClient = Annotated[AsyncWebClient, Depends(get_slack_client)]
-
-
-def get_llm_client() -> ChatOpenAI:
-    """Create OpenAI LLM client for analytics chatbot."""
-    return ChatOpenAI(
-        model=settings.AI_MODEL,
-        temperature=0,
-        api_key=settings.OPENAI_API_KEY,
-    )
-
-
 LLMClient = Annotated[ChatOpenAI, Depends(get_llm_client)]
 
 

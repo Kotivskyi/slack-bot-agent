@@ -283,10 +283,10 @@ class SlackService:
         Returns:
             Dict with text, blocks, and any file upload info.
         """
-        from app.api.deps import get_llm_client
         from app.db.session import get_analytics_db_context, get_db_context
         from app.repositories import ConversationRepository, turns_to_history
         from app.services.agent import AnalyticsAgentService
+        from app.services.llm import get_llm_client
 
         # Thread ID for conversation continuity
         thread_id = f"slack_thread_{thread_ts}" if thread_ts else f"slack_user_{user_id}"
