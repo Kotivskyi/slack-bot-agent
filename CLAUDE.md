@@ -34,6 +34,9 @@ make docker-up        # Start all backend services
 ## Project Structure
 
 ```
+├── .claude/skills/           # Claude Code skills
+│   ├── dependency-management/ # FastAPI + LangGraph patterns
+│   └── skill-creator/         # Guide for creating new skills
 ├── docs/                     # Documentation
 │   ├── database_skill.md     # Database & repository patterns
 │   ├── agent_architecture.md # Analytics chatbot docs
@@ -201,6 +204,7 @@ Async everywhere in this project:
 
 Before starting complex tasks, read relevant docs:
 - **Database patterns:** `docs/database_skill.md`
+- **Dependency management:** Use `/dependency-management` skill (FastAPI + LangGraph integration)
 - **Analytics chatbot:** `docs/agent_architecture.md`
 - **System architecture:** `docs/system-architecture.md`
 
