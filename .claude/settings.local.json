@@ -28,7 +28,8 @@
       "Bash(make check:*)",
       "Bash(make test:*)",
       "Bash(make:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "WebFetch(domain:microsoft.github.io)"
     ]
   }
 }

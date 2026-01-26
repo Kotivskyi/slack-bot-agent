@@ -1,4 +1,4 @@
-.PHONY: install format lint test evals evals-quick run clean help db-init db-seed
+.PHONY: install format lint test evals evals-quick run clean help db-init db-seed train train-eval train-status train-baseline train-optimized train-compare train-workflow
 
 # === Setup ===
 install:
@@ -41,6 +41,28 @@ evals:
 
 evals-quick:
 	uv run python -m evals.main --quick
+
+# === Training ===
+train:
+	uv run slack_analytics_app cmd train --prompt sql_generator --rounds 5
+
+train-eval:
+	uv run slack_analytics_app cmd train --prompt sql_generator --eval-only
+
+train-status:
+	uv run slack_analytics_app cmd train-status
+
+train-baseline:
+	uv run slack_analytics_app cmd train-baseline
+
+train-optimized:
+	uv run slack_analytics_app cmd train-optimized
+
+train-compare:
+	uv run slack_analytics_app cmd train-compare
+
+train-workflow:
+	uv run slack_analytics_app cmd train-workflow
 
 # === Database ===
 db-init: docker-db
@@ -153,6 +175,15 @@ help:
 	@echo "  make evals-quick   Quick evaluation (3 cases)"
 	@echo "  make lint          Check code quality"
 	@echo "  make format        Auto-format code"
+	@echo ""
+	@echo "Training (agent-lightning):"
+	@echo "  make train            Train SQL generator prompt (5 rounds)"
+	@echo "  make train-baseline   Run baseline evaluation (before training)"
+	@echo "  make train-optimized  Run optimized evaluation (after training)"
+	@echo "  make train-compare    Compare baseline vs optimized results"
+	@echo "  make train-workflow   Full workflow: baseline -> train -> compare"
+	@echo "  make train-eval       Evaluate current prompts"
+	@echo "  make train-status     Show training status"
 	@echo ""
 	@echo "Database:"
 	@echo "  make db-init       Initialize database (start + migrate)"

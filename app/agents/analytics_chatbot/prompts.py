@@ -1,9 +1,81 @@
 """LLM prompts for the analytics chatbot.
 
 Contains all prompt templates used by the chatbot nodes.
+Supports loading optimized prompts from trained_prompts/ directory.
 """
 
+import os
+from pathlib import Path
+
 from langchain_core.prompts import ChatPromptTemplate
+
+# Directory for optimized prompts (relative to project root)
+TRAINED_PROMPTS_DIR = Path(__file__).parent.parent.parent.parent / "trained_prompts"
+
+# Environment variable to disable optimized prompts (for testing)
+USE_OPTIMIZED_PROMPTS = os.environ.get("USE_OPTIMIZED_PROMPTS", "true").lower() == "true"
+
+
+def _load_optimized_prompt(name: str) -> str | None:
+    """Load an optimized prompt from disk if available.
+
+    Args:
+        name: Name of the prompt (e.g., 'sql_generator').
+
+    Returns:
+        Optimized prompt content, or None if not found.
+    """
+    if not USE_OPTIMIZED_PROMPTS:
+        return None
+
+    prompt_path = TRAINED_PROMPTS_DIR / f"{name}.txt"
+    if prompt_path.exists():
+        return prompt_path.read_text()
+    return None
+
+
+def _create_sql_generator_prompt(system_template: str | None = None) -> ChatPromptTemplate:
+    """Create the SQL generator prompt template.
+
+    Args:
+        system_template: Optional custom system template.
+
+    Returns:
+        Configured ChatPromptTemplate.
+    """
+    if system_template is None:
+        system_template = """You are an expert SQL generator for a mobile app analytics database.
+
+DATABASE SCHEMA:
+{schema}
+
+EXAMPLES:
+{examples}
+
+SAFETY RULES (CRITICAL):
+1. Generate ONLY SELECT or WITH statements
+2. NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
+3. Query must start with SELECT or WITH - no other statement types allowed
+
+GENERATION RULES:
+1. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
+2. Include meaningful column aliases
+3. Add LIMIT for potentially large result sets
+4. Note any assumptions made about ambiguous terms
+
+Return JSON format:
+{{
+    "sql": "<your SQL query>",
+    "assumptions": ["assumption 1", "assumption 2"]
+}}"""
+
+    return ChatPromptTemplate.from_messages(
+        [
+            ("system", system_template),
+            ("human", "Question: {query}"),
+        ]
+    )
+
 
 # =============================================================================
 # Intent Classification
@@ -177,38 +249,9 @@ SQL: WITH jan_2025 AS (
 Assumptions: Comparing full months. Showing absolute change.
 """
 
-SQL_GENERATOR_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """You are an expert SQL generator for a mobile app analytics database.
-
-DATABASE SCHEMA:
-{schema}
-
-EXAMPLES:
-{examples}
-
-SAFETY RULES (CRITICAL):
-1. Generate ONLY SELECT or WITH statements
-2. NEVER use: DROP, DELETE, UPDATE, INSERT, TRUNCATE, ALTER, CREATE, GRANT, REVOKE, EXEC, EXECUTE
-3. Query must start with SELECT or WITH - no other statement types allowed
-
-GENERATION RULES:
-1. Always use appropriate aggregations (SUM, COUNT, AVG) for metrics
-2. Include meaningful column aliases
-3. Add LIMIT for potentially large result sets
-4. Note any assumptions made about ambiguous terms
-
-Return JSON format:
-{{
-    "sql": "<your SQL query>",
-    "assumptions": ["assumption 1", "assumption 2"]
-}}""",
-        ),
-        ("human", "Question: {query}"),
-    ]
-)
+# Load optimized SQL generator prompt if available
+_optimized_sql_prompt = _load_optimized_prompt("sql_generator")
+SQL_GENERATOR_PROMPT = _create_sql_generator_prompt(_optimized_sql_prompt)
 
 # =============================================================================
 # Result Interpretation
@@ -295,3 +338,46 @@ Generate a fixed SQL query:""",
         ),
     ]
 )
+
+
+# =============================================================================
+# Prompt Management Utilities
+# =============================================================================
+
+
+def reload_sql_generator_prompt() -> ChatPromptTemplate:
+    """Reload the SQL generator prompt, checking for optimized versions.
+
+    Useful for reloading prompts after training without restarting the app.
+
+    Returns:
+        Reloaded ChatPromptTemplate.
+    """
+    global SQL_GENERATOR_PROMPT
+    optimized = _load_optimized_prompt("sql_generator")
+    SQL_GENERATOR_PROMPT = _create_sql_generator_prompt(optimized)
+    return SQL_GENERATOR_PROMPT
+
+
+def has_optimized_prompt(name: str) -> bool:
+    """Check if an optimized prompt exists.
+
+    Args:
+        name: Name of the prompt (e.g., 'sql_generator').
+
+    Returns:
+        True if an optimized prompt file exists.
+    """
+    prompt_path = TRAINED_PROMPTS_DIR / f"{name}.txt"
+    return prompt_path.exists()
+
+
+def list_optimized_prompts() -> list[str]:
+    """List all available optimized prompts.
+
+    Returns:
+        List of prompt names that have optimized versions.
+    """
+    if not TRAINED_PROMPTS_DIR.exists():
+        return []
+    return [p.stem for p in TRAINED_PROMPTS_DIR.glob("*.txt")]

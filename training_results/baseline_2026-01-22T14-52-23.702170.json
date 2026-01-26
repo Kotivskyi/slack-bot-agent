@@ -1,0 +1,343 @@
+{
+  "timestamp": "2026-01-22T14:52:23.702170",
+  "model": "gpt-4.1-mini",
+  "prompt_version": "baseline",
+  "n_tasks": 19,
+  "avg_reward": 0.0,
+  "min_reward": 0.0,
+  "max_reward": 0.0,
+  "sql_generated_score": 0.0,
+  "sql_contains_score": 0.05263157894736842,
+  "sql_execution_score": 1.0,
+  "intent_score": 0.0,
+  "response_score": 1.0,
+  "sql_generation_rate": 0.0,
+  "execution_success_rate": 0.0,
+  "total_tokens": 0,
+  "total_cost_usd": 0.0,
+  "task_results": [
+    {
+      "task_id": "simple_ios_count_rephrased_26",
+      "query": "What's the iOS app count?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "complex_ios_apps_popularity_rephrased_34",
+      "query": "Most popular iOS apps?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "time_yesterday",
+      "query": "How many installs did we get yesterday?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "time_this_month",
+      "query": "Show me revenue for this month",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "time_year_to_date",
+      "query": "Year to date revenue",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "simple_ios_count_rephrased_25",
+      "query": "Count iOS apps",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "basic_all_revenue",
+      "query": "Show all revenue",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "group_by_date",
+      "query": "Daily installs trend",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "complex_top_revenue_country_rephrased_29",
+      "query": "What country has highest revenue?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "simple_ios_count_rephrased_27",
+      "query": "Number of iPhone apps?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "basic_total_installs",
+      "query": "Total installs",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "follow_up_last_month",
+      "query": "And last month?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 1.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "rank_top_countries",
+      "query": "Top 3 countries by revenue",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "calc_ads_percentage",
+      "query": "What percentage of revenue comes from ads?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "intent_ads_revenue",
+      "query": "How much ads revenue did we make last month?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "complex_top_revenue_country_rephrased_28",
+      "query": "Top revenue country?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "complex_top_revenue_country_rephrased_31",
+      "query": "Country with maximum revenue?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "agg_total_revenue",
+      "query": "What's the total revenue including both in-app and ads?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "task_id": "follow_up_ios_after_android",
+      "query": "What about iOS?",
+      "scores": {
+        "sql_generated": 0.0,
+        "sql_contains": 0.0,
+        "sql_execution": 1.0,
+        "intent": 0.0,
+        "response": 1.0,
+        "overall": 0.0
+      },
+      "generated_sql": null,
+      "sql_error": null,
+      "intent": null,
+      "input_tokens": 0,
+      "output_tokens": 0
+    }
+  ]
+}
